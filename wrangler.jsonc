@@ -1,0 +1,22 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "justin-weightloss-tracker",
+  "main": "src/index.ts",
+  "compatibility_date": "2025-05-05",
+  "assets": {
+    "directory": "./public",
+    "binding": "ASSETS",
+    "not_found_handling": "single-page-application"
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "weightloss-db",
+      "database_id": "37bb8278-60f2-4307-a7e2-5dbfd28c415c",
+      "migrations_dir": "migrations"
+    }
+  ],
+  "observability": {
+    "enabled": true
+  }
+}
