@@ -50,9 +50,9 @@ input, select { font: inherit; }
   color: #fff;
   box-shadow: var(--shadow-lg);
 }
-.brand { display: flex; align-items: center; gap: 10px; font-weight: 700; font-size: 17px; letter-spacing: .2px; white-space: nowrap; }
+.brand { display: flex; align-items: center; gap: 9px; font-weight: 700; font-size: clamp(13px, 2.6vw, 16px); letter-spacing: .2px; white-space: nowrap; min-width: 0; }
 .brand .ic { color: #fff; }
-.brand small { display: block; font-size: 10.5px; font-weight: 500; opacity: .85; letter-spacing: 1.4px; text-transform: uppercase; }
+.brand small { display: block; font-size: 10px; font-weight: 600; opacity: .85; letter-spacing: 1.6px; text-transform: uppercase; }
 .topnav { display: flex; gap: 4px; margin-left: 8px; }
 .topnav a {
   color: rgba(255,255,255,.88); font-size: 14px; font-weight: 600;

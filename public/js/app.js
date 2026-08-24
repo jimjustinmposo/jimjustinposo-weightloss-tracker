@@ -21,7 +21,7 @@ function buildShell() {
   const name = App.user?.name || App.user?.email?.split('@')[0] || '';
   shell().innerHTML = `
     <header class="topbar">
-      <div class="brand">${icons.heart}<span>WeightLoss<small>Tracker</small></span></div>
+      <div class="brand">${icons.heart}<span>Develop by Jim Justin Poso<small>Weightloss Tracker</small></span></div>
       <nav class="topnav">
         ${NAV.map((n) => `<a href="${n.hash}" data-nav="${n.hash}">${n.label}</a>`).join('')}
       </nav>
@@ -50,8 +50,10 @@ function buildShell() {
 
 function markActive() {
   const h = location.hash || '#/dashboard';
+  // Treat onboarding as the Profile page for nav highlighting.
+  const active = h === '#/onboarding' ? '#/profile' : h;
   document.querySelectorAll('[data-nav]').forEach((a) => {
-    a.classList.toggle('active', a.dataset.nav === h);
+    a.classList.toggle('active', a.dataset.nav === active);
   });
 }
 
@@ -142,6 +144,7 @@ const routes = {
   '#/foods': renderFoodsPage,
   '#/history': renderHistory,
   '#/profile': renderProfilePage,
+  '#/onboarding': renderProfilePage,
 };
 
 async function route() {
