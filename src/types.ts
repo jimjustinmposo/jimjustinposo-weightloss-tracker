@@ -3,6 +3,17 @@ import type { Context } from 'hono';
 export type Env = {
   DB: D1Database;
   ASSETS: Fetcher;
+  /* ---- Optional integrations (set via .dev.vars locally / `wrangler secret put` in prod) ---- */
+  /** Bot token from @BotFather — never hard-code. */
+  TELEGRAM_BOT_TOKEN?: string;
+  /** Secret token Telegram echoes back in the X-Telegram-Bot-Api-Secret-Token header. */
+  TELEGRAM_WEBHOOK_SECRET?: string;
+  /** OpenAI-compatible endpoint for local AI (e.g. http://127.0.0.1:1234/v1 for LM Studio). */
+  AI_BASE_URL?: string;
+  AI_API_KEY?: string;
+  AI_MODEL?: string;
+  /** Hours offset from UTC used to compute "today" for Telegram commands (default 0). */
+  TELEGRAM_TZ_OFFSET_HOURS?: string;
 };
 
 export type AppVars = {

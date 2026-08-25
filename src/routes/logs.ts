@@ -20,6 +20,65 @@ function round2(v: number): number {
   return Math.round(v * 100) / 100;
 }
 
+/* ------------------------------------------------------------------ */
+/* Shared helpers — also used by the Telegram bot so BOTH paths apply  */
+/* the exact same catalog-nutrition math and insert logic.            */
+/* ------------------------------------------------------------------ */
+
+type CatalogFood = {
+  id: number;
+  name: string;
+  serving_grams: number;
+  calories_per_100g: number;
+  protein_per_100g: number;
+  carbs_per_100g: number;
+  fat_per_100g: number;
+};
+
+/** Fetch one catalog food owned by the user. */
+export async function getCatalogFood(db: D1Database, userId: number, foodId: number): Promise<CatalogFood | null> {
+  return db
+    .prepare('SELECT * FROM foods WHERE id = ?1 AND user_id = ?2')
+    .bind(foodId, userId)
+    .first<CatalogFood>();
+}
+
+/** Scale a catalog food to `grams` using the SAME rounding as the web app. */
+export function scaleFood(food: CatalogFood, grams: number) {
+  const factor = grams / 100;
+  return {
+    calories: round2(food.calories_per_100g * factor),
+    protein: round2(food.protein_per_100g * factor),
+    carbs: round2(food.carbs_per_100g * factor),
+    fat: round2(food.fat_per_100g * factor),
+  };
+}
+
+export type NewLogEntry = {
+  date: string;
+  meal: MealType;
+  grams: number;
+  foodId: number | null;
+  name: string;
+  calories: number;
+  protein: number;
+  carbs: number;
+  fat: number;
+};
+
+/** Insert one food log row and return the stored entry (shared with Telegram). */
+export async function insertFoodLog(db: D1Database, userId: number, p: NewLogEntry): Promise<LogRow> {
+  const res = await db.prepare(
+    `INSERT INTO food_logs (user_id, food_id, name, meal, grams, calories, protein, carbs, fat, log_date)
+     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)`
+  )
+    .bind(userId, p.foodId, p.name, p.meal, p.grams, p.calories, p.protein, p.carbs, p.fat, p.date)
+    .run();
+  return (await db.prepare('SELECT * FROM food_logs WHERE id = ?1')
+    .bind(res.meta.last_row_id as number)
+    .first<LogRow>())!;
+}
+
 app.get('/', async (c) => {
   const userId = c.get('userId');
   const date = c.req.query('date');
@@ -83,17 +142,12 @@ app.post('/', async (c) => {
 
   const foodIdRaw = body.food_id != null ? Number(body.food_id) : null;
   if (foodIdRaw != null && Number.isFinite(foodIdRaw)) {
-    const food = await c.env.DB.prepare('SELECT * FROM foods WHERE id = ?1 AND user_id = ?2')
-      .bind(foodIdRaw, userId)
-      .first<FoodRow>();
+    const food = await getCatalogFood(c.env.DB, userId, foodIdRaw);
     if (!food) throw new HTTPException(404, { message: 'Food not found in your catalog.' });
-    const factor = grams / 100;
+    const scaled = scaleFood(food, grams);
     foodId = food.id;
     name = food.name;
-    calories = round2(food.calories_per_100g * factor);
-    protein = round2(food.protein_per_100g * factor);
-    carbs = round2(food.carbs_per_100g * factor);
-    fat = round2(food.fat_per_100g * factor);
+    ({ calories, protein, carbs, fat } = scaled);
   } else {
     // Custom entry — nutrition values are for the entered amount.
     name = String(body.name ?? '').trim().slice(0, 120);
@@ -132,16 +186,17 @@ app.post('/', async (c) => {
     }
   }
 
-  const res = await c.env.DB.prepare(
-    `INSERT INTO food_logs (user_id, food_id, name, meal, grams, calories, protein, carbs, fat, log_date)
-     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)`
-  )
-    .bind(userId, foodId, name, meal, grams, calories, protein, carbs, fat, date)
-    .run();
-
-  const entry = await c.env.DB.prepare('SELECT * FROM food_logs WHERE id = ?1')
-    .bind(res.meta.last_row_id as number)
-    .first<LogRow>();
+  const entry = await insertFoodLog(c.env.DB, userId, {
+    date,
+    meal,
+    grams,
+    foodId,
+    name,
+    calories,
+    protein,
+    carbs,
+    fat,
+  });
   return c.json({ entry }, 201);
 });
 

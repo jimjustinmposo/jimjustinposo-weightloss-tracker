@@ -8,6 +8,7 @@ import logsRoutes from './routes/logs';
 import stepsRoutes from './routes/steps';
 import weightsRoutes from './routes/weights';
 import dashboardRoutes from './routes/dashboard';
+import telegramRoutes from './routes/telegram';
 import type { AppVars, Env } from './types';
 
 const app = new Hono<{ Bindings: Env; Variables: AppVars }>();
@@ -21,7 +22,7 @@ app.onError((err, c) => {
 app.get('/api/health', (c) => c.json({ ok: true, service: 'weightloss-tracker' }));
 
 // Session guard for everything under /api except the public endpoints below.
-const PUBLIC_PATHS = new Set(['/api/health', '/api/auth/register', '/api/auth/login']);
+const PUBLIC_PATHS = new Set(['/api/health', '/api/auth/register', '/api/auth/login', '/api/telegram/webhook']);
 app.use('/api/*', async (c, next) => {
   if (PUBLIC_PATHS.has(c.req.path)) return next();
   return requireAuth(c, next);
@@ -34,6 +35,7 @@ app.route('/api/logs', logsRoutes);
 app.route('/api/steps', stepsRoutes);
 app.route('/api/weights', weightsRoutes);
 app.route('/api/dashboard', dashboardRoutes);
+app.route('/api/telegram', telegramRoutes);
 
 // Unknown /api routes → JSON 404; anything else → SPA shell via static assets.
 app.notFound((c) => {

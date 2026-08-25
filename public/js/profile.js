@@ -102,6 +102,16 @@ export function renderProfilePage(root) {
           <h3>${icons.flame} Live Target Preview</h3>
           <div id="pv" class="grid grid-c2"></div>
         </div>
+        <br/>
+        <div class="card">
+          <h3>✈️ Telegram</h3>
+          <p style="font-size:13px;color:var(--muted);margin-bottom:10px">
+            Log meals by message! Generate a link code, then send
+            <b>/link CODE</b> to your bot within 15 minutes.
+          </p>
+          <button class="btn sm accent" id="tg-link-btn">${icons.plus} Generate link code</button>
+          <p class="form-hint" id="tg-code-out" style="margin-top:8px"></p>
+        </div>
       </div>
     </div>`;
   const form = qs('#pf-form', root);
@@ -155,6 +165,19 @@ export function renderProfilePage(root) {
       App.profile = data.profile;
       toast(onboarding ? 'Profile ready — welcome aboard!' : 'Profile updated');
       location.hash = '#/dashboard';
+    } catch (err) {
+      toast(err.message, 'error');
+    }
+  });
+
+  // Telegram linking — generate a one-time code bound to THIS logged-in account.
+  qs('#tg-link-btn', root).addEventListener('click', async () => {
+    const out = qs('#tg-code-out', root);
+    try {
+      const r = await api.post('/api/telegram/link-code');
+      out.innerHTML =
+        `Your code: <b style="font-size:18px;letter-spacing:2px">${esc(r.code)}</b><br/>` +
+        `In Telegram, send your bot: <b>/link ${esc(r.code)}</b> (valid ${r.expires_in_minutes} min).`;
     } catch (err) {
       toast(err.message, 'error');
     }

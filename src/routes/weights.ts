@@ -31,33 +31,31 @@ app.get('/', async (c) => {
   return c.json({ entries });
 });
 
-// Log weight for a date (upsert), sync profile weight + recompute all targets.
-app.post('/', async (c) => {
-  const userId = c.get('userId');
-  const body = (await c.req.json().catch(() => ({}))) as Record<string, unknown>;
-
-  const date = body.date;
-  if (!isDateStr(date)) throw new HTTPException(400, { message: 'A valid date (YYYY-MM-DD) is required.' });
-
-  const weight = Number(body.weight);
-  if (!Number.isFinite(weight) || weight < 25 || weight > 450) {
-    throw new HTTPException(400, { message: 'Weight must be between 25 and 450 kg.' });
-  }
-
-  await c.env.DB.prepare(
+/**
+ * Log weight for a date (upsert), sync profile weight + recompute all targets.
+ * Shared by the web POST route and the Telegram bot's /weight command.
+ */
+export async function applyWeightLog(
+  db: D1Database,
+  userId: number,
+  date: string,
+  weight: number,
+  note: string | null = null
+): Promise<{ entry: Any; profile: Any | null }> {
+  await db.prepare(
     `INSERT INTO weight_logs (user_id, log_date, weight, note) VALUES (?1, ?2, ?3, ?4)
      ON CONFLICT(user_id, log_date) DO UPDATE SET weight=excluded.weight, note=excluded.note`
   )
-    .bind(userId, date, weight, typeof body.note === 'string' ? body.note.slice(0, 200) : null)
+    .bind(userId, date, weight, typeof note === 'string' ? note.slice(0, 200) : null)
     .run();
 
-  const entry = await c.env.DB.prepare('SELECT * FROM weight_logs WHERE user_id = ?1 AND log_date = ?2')
+  const entry = await db.prepare('SELECT * FROM weight_logs WHERE user_id = ?1 AND log_date = ?2')
     .bind(userId, date)
     .first<Any>();
 
   // Sync current weight into the profile and refresh derived targets.
   const profile =
-    (await c.env.DB.prepare(
+    (await db.prepare(
       'SELECT name, age, gender, height_cm, activity_level, start_weight, current_weight, goal_type, weekly_goal_kg FROM profiles WHERE user_id = ?1'
     ).bind(userId).first<ProfileRow>()) ?? null;
 
@@ -72,7 +70,7 @@ app.post('/', async (c) => {
       goalType: profile.goal_type,
       weeklyGoalKg: profile.weekly_goal_kg,
     });
-    await c.env.DB.prepare(
+    await db.prepare(
       `UPDATE profiles SET current_weight=?2, bmr=?3, tdee=?4, bmi=?5, bmi_category=?6,
          calorie_target=?7, protein_target=?8, carb_target=?9, fat_target=?10, updated_at=datetime('now')
        WHERE user_id=?1`
@@ -92,8 +90,30 @@ app.post('/', async (c) => {
       .run();
   }
 
-  const updatedProfile = await c.env.DB.prepare('SELECT * FROM profiles WHERE user_id = ?1').bind(userId).first<Any>();
-  return c.json({ entry, profile: updatedProfile }, 201);
+  const updatedProfile = await db.prepare('SELECT * FROM profiles WHERE user_id = ?1').bind(userId).first<Any>();
+  return { entry: entry as Any, profile: updatedProfile };
+}
+
+app.post('/', async (c) => {
+  const userId = c.get('userId');
+  const body = (await c.req.json().catch(() => ({}))) as Record<string, unknown>;
+
+  const date = body.date;
+  if (!isDateStr(date)) throw new HTTPException(400, { message: 'A valid date (YYYY-MM-DD) is required.' });
+
+  const weight = Number(body.weight);
+  if (!Number.isFinite(weight) || weight < 25 || weight > 450) {
+    throw new HTTPException(400, { message: 'Weight must be between 25 and 450 kg.' });
+  }
+
+  const { entry, profile } = await applyWeightLog(
+    c.env.DB,
+    userId,
+    date,
+    weight,
+    typeof body.note === 'string' ? body.note : null
+  );
+  return c.json({ entry, profile }, 201);
 });
 
 app.delete('/:id', async (c) => {

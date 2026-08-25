@@ -13,6 +13,37 @@ function shift(dateStr: string, deltaDays: number): string {
   return dt.toISOString().slice(0, 10);
 }
 
+/* Shared SQL so the web dashboard and the Telegram bot compute identical totals. */
+const SQL_DAY_TOTALS = `SELECT COALESCE(SUM(calories),0) AS calories, COALESCE(SUM(protein),0) AS protein,
+        COALESCE(SUM(carbs),0) AS carbs, COALESCE(SUM(fat),0) AS fat
+ FROM food_logs WHERE user_id = ?1 AND log_date = ?2`;
+const SQL_STEPS_TODAY = 'SELECT steps, calories_burned FROM step_logs WHERE user_id = ?1 AND log_date = ?2';
+
+/**
+ * One day's consumed/burned/net totals — reused by the Telegram /today and
+ * /progress commands so both surfaces show the same numbers as the web app.
+ */
+export async function getDaySummary(db: D1Database, userId: number, date: string) {
+  const [totalsRow, stepsRow] = await Promise.all([
+    db.prepare(SQL_DAY_TOTALS).bind(userId, date).first<Any>(),
+    db.prepare(SQL_STEPS_TODAY).bind(userId, date).first<Any>(),
+  ]);
+  const consumed = {
+    calories: Math.round(Number(totalsRow?.calories ?? 0) * 100) / 100,
+    protein: Math.round(Number(totalsRow?.protein ?? 0) * 100) / 100,
+    carbs: Math.round(Number(totalsRow?.carbs ?? 0) * 100) / 100,
+    fat: Math.round(Number(totalsRow?.fat ?? 0) * 100) / 100,
+  };
+  const steps = Number(stepsRow?.steps ?? 0);
+  const burnedSteps = Math.round(Number(stepsRow?.calories_burned ?? 0) * 10) / 10;
+  return {
+    consumed,
+    steps,
+    burned_steps: burnedSteps,
+    net_calories: Math.round((consumed.calories - burnedSteps) * 10) / 10,
+  };
+}
+
 /** Everything the dashboard needs in one round-trip. */
 app.get('/', async (c) => {
   const userId = c.get('userId');
@@ -24,21 +55,13 @@ app.get('/', async (c) => {
   const [profileRow, totalsRow, mealsRows, stepsTodayRow, weightsRows, stepsSeriesRows, calSeriesRows] =
     await Promise.all([
       c.env.DB.prepare('SELECT * FROM profiles WHERE user_id = ?1').bind(userId).first<Any>(),
-      c.env.DB.prepare(
-        `SELECT COALESCE(SUM(calories),0) AS calories, COALESCE(SUM(protein),0) AS protein,
-                COALESCE(SUM(carbs),0) AS carbs, COALESCE(SUM(fat),0) AS fat
-         FROM food_logs WHERE user_id = ?1 AND log_date = ?2`
-      )
-        .bind(userId, date)
-        .first<Any>(),
+      c.env.DB.prepare(SQL_DAY_TOTALS).bind(userId, date).first<Any>(),
       c.env.DB.prepare(
         'SELECT * FROM food_logs WHERE user_id = ?1 AND log_date = ?2 ORDER BY created_at ASC, id ASC'
       )
         .bind(userId, date)
         .all<Any>(),
-      c.env.DB.prepare('SELECT steps, calories_burned FROM step_logs WHERE user_id = ?1 AND log_date = ?2')
-        .bind(userId, date)
-        .first<Any>(),
+      c.env.DB.prepare(SQL_STEPS_TODAY).bind(userId, date).first<Any>(),
       c.env.DB.prepare('SELECT log_date, weight FROM weight_logs WHERE user_id = ?1 ORDER BY log_date DESC LIMIT 90')
         .bind(userId)
         .all<Any>(),
