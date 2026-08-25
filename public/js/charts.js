@@ -130,19 +130,20 @@ export function barChart(items, opts = {}) {
 
 /** Circular progress ring (returns wrapper HTML with centered content). */
 export function ring({ pct, size = 128, stroke = 11, color = '#1976D2', big = '', sub = '' }) {
+  // Accept 0–1 or 0–100. p=0 → all gray · p=0.5 → half blue / half gray · p=1 → all blue.
   let p = Number(pct) || 0;
-  if (p > 1) p /= 100; // accept 0–1 or 0–100 so the arc always reflects real progress
+  if (p > 1) p /= 100;
   p = clamp(p, 0, 1);
   const r = (size - stroke) / 2;
   const C = 2 * Math.PI * r;
-  const off = C * (1 - p);
+  const off = C * (1 - p); // how much of the track stays "unfilled"
   return `
     <div class="ring-wrap" style="width:${size}px">
       <svg viewBox="0 0 ${size} ${size}">
         <circle cx="${size / 2}" cy="${size / 2}" r="${r}" fill="none" stroke="#E8EEF7" stroke-width="${stroke}"/>
         <circle class="ring-fg" cx="${size / 2}" cy="${size / 2}" r="${r}" fill="none" stroke="${color}" stroke-width="${stroke}"
-          stroke-linecap="round" stroke-dasharray="${C.toFixed(1)}" stroke-dashoffset="${off.toFixed(1)}"
-          style="--ring-c:${C.toFixed(1)}"/>
+          stroke-linecap="round" stroke-dasharray="${C.toFixed(2)}" stroke-dashoffset="${off.toFixed(2)}"
+          data-c="${C.toFixed(2)}" data-off="${off.toFixed(2)}"/>
       </svg>
       <div class="ring-center"><span class="big">${big}</span><span class="sub">${sub}</span></div>
     </div>`;

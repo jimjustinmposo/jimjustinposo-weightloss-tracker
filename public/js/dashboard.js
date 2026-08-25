@@ -17,15 +17,31 @@ function bmiBadgeClass(bmiValue) {
   return 'bad';
 }
 
-/* Animate a number from 0 to target with an ease-out curve. */
-function countUp(el, target, dur = 900) {
-  const t0 = performance.now();
-  const tick = (now) => {
-    const t = Math.min(1, (now - t0) / dur);
-    el.textContent = fmt(Math.round(target * (1 - Math.pow(1 - t, 3))));
-    if (t < 1) requestAnimationFrame(tick);
-  };
-  requestAnimationFrame(tick);
+/* Animate every progress ring: the colored arc sweeps from empty to its true
+   fraction (pure attribute tweening — works in every browser) while the center
+   number counts up. E.g. 800/1600 kcal → the circle ends exactly half blue. */
+function animateRings(rootEl, dur = 900) {
+  qsa('.ring-wrap', rootEl).forEach((wrapEl) => {
+    const fg = qs('.ring-fg', wrapEl);
+    const bigEl = qs('.ring-center .big', wrapEl);
+    if (!fg) return;
+
+    const C = Number(fg.dataset.c || 0);         // full circumference
+    const targetOff = Number(fg.dataset.off || 0); // final offset for the true fraction
+    const targetNum = bigEl ? Number(String(bigEl.textContent).replace(/[^0-9.-]/g, '')) : NaN;
+
+    const t0 = performance.now();
+    const tick = (now) => {
+      const t = Math.min(1, (now - t0) / dur);
+      const eased = 1 - Math.pow(1 - t, 3);
+      fg.setAttribute('stroke-dashoffset', (C - (C - targetOff) * eased).toFixed(2));
+      if (bigEl && Number.isFinite(targetNum) && targetNum > 0) {
+        bigEl.textContent = fmt(Math.round(targetNum * eased));
+      }
+      if (t < 1) requestAnimationFrame(tick);
+    };
+    requestAnimationFrame(tick);
+  });
 }
 
 export function weightModal(onSaved) {
@@ -235,13 +251,8 @@ export async function renderDashboard(root) {
       ${mealsHtml || '<div class="empty">No food logged yet for this day.</div>'}
     </section>`;
 
-  /* ---- dynamic rings: count the center numbers up while the arcs sweep in ---- */
-  qsa('.ring-wrap', root).forEach((wrapEl) => {
-    const bigEl = qs('.ring-center .big', wrapEl);
-    if (!bigEl) return;
-    const v = Number(String(bigEl.textContent).replace(/[^0-9.-]/g, ''));
-    if (Number.isFinite(v) && v > 0) countUp(bigEl, v);
-  });
+  /* ---- dynamic rings: sweep arcs + count numbers up ---- */
+  animateRings(root);
 
   /* ---- wiring ---- */
   qs('#dash-date', root).addEventListener('change', (e) => {
