@@ -3,6 +3,7 @@ import type { AppVars, Env } from '../types';
 import type { MealType } from '../types';
 import { getCatalogFood, insertFoodLog, scaleFood } from './logs';
 import { applyWeightLog } from './weights';
+import { applyStepLog } from './steps';
 import { getDaySummary } from './dashboard';
 import { AiUnavailableError, extractFoods } from '../telegram/ai';
 import {
@@ -154,7 +155,9 @@ const HELP_TEXT =
   '<i>300g chicken breast, 4 eggs and 20g salted butter</i>\n' +
   '<i>Breakfast: 4 eggs and 20g butter</i>\n' +
   '<i>10 oz ribeye</i>\n\n' +
-  'You confirm before anything is saved.\n\n' +
+  'Steps &amp; weight work too:\n' +
+  '<i>add 1000 steps</i> · <i>weight 84.6</i>\n\n' +
+  'You confirm meals before anything is saved.\n\n' +
   '<b>Commands</b>\n' +
   '/today – today\'s totals\n' +
   '/meals – today\'s logged meals\n' +
@@ -277,6 +280,51 @@ async function handleText(env: Env, chatId: number, telegramUserId: number, text
       await sendMessage(env, chatId, `⚖️ Weight recorded\n\n${kg} kg`);
     } catch (e) {
       console.error('[telegram] /weight failed:', e);
+      await sendMessage(env, chatId, '⚠️ Could not save your weight right now. Please try again.');
+    }
+    return;
+  }
+
+  /* ---- natural-language STEPS: "add 1000 steps", "10000 steps today" ---- */
+  const sMatch =
+    /(\d[\d,]*)\s*(?:steps?|step)\b/i.exec(text) ||
+    /\bsteps?\b\s*(?:count|total)?\s*[:=]?\s*(\d[\d,]*)/i.exec(text);
+  if (sMatch) {
+    const n = Number(sMatch[1].replace(/,/g, ''));
+    if (!Number.isFinite(n) || n < 0 || n > 200000) {
+      await sendMessage(env, chatId, '⚠️ Steps must be between 0 and 200,000. Example: add 5000 steps');
+      return;
+    }
+    try {
+      const log = await applyStepLog(db, userId, botToday(env), n);
+      const burned = Math.round(Number(log?.calories_burned ?? 0) * 10) / 10;
+      await sendMessage(env, chatId, `👣 Steps recorded\n\n${n.toLocaleString('en-US')} steps\n≈ ${burned} kcal burned`);
+    } catch (e) {
+      console.error('[telegram] natural steps failed:', e);
+      await sendMessage(env, chatId, '⚠️ Could not save your steps right now. Please try again.');
+    }
+    return;
+  }
+
+  /* ---- natural-language WEIGHT: "weight 84.6", "I weigh 84.6kg", "84.6 kg" ---- */
+  const saysWeight = /\b(weigh|weight|weigth)/i.test(text);
+  const bareKg = /^\s*\d+(?:\.\d+)?\s*kgs?\s*$/i.test(text);
+  if (saysWeight || bareKg) {
+    const m = /(\d+(?:\.\d+)?)/.exec(text.replace(/^[^0-9]*/, ''));
+    if (!m) {
+      await sendMessage(env, chatId, '⚠️ How heavy? Example: weight 84.6');
+      return;
+    }
+    const kg = Number(m[1]);
+    if (kg < 25 || kg > 450) {
+      await sendMessage(env, chatId, '⚠️ Weight must be between 25 and 450 kg.');
+      return;
+    }
+    try {
+      await applyWeightLog(db, userId, botToday(env), kg);
+      await sendMessage(env, chatId, `⚖️ Weight recorded\n\n${kg} kg`);
+    } catch (e) {
+      console.error('[telegram] natural weight failed:', e);
       await sendMessage(env, chatId, '⚠️ Could not save your weight right now. Please try again.');
     }
     return;

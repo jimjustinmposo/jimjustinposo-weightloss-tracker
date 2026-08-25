@@ -213,7 +213,10 @@ function singularForUnit(rawUnit) {
  * Items without any amount come back with quantity:null so the bot can ask.
  */
 export function localExtract(text) {
-  const chunks = String(text ?? '')
+  // Newlines act as item separators — normalize them to commas up front so
+  // the per-chunk regexes (whose `.` can't cross newlines) behave predictably.
+  const norm = String(text ?? '').replace(/\r?\n/g, ', ');
+  const chunks = norm
     .split(CHUNK_SPLIT)
     .map((s) => {
       // strip conversational fillers BEFORE pattern matching
@@ -223,6 +226,8 @@ export function localExtract(text) {
     })
     .filter(Boolean)
     .slice(0, 12);
+  console.log('[LE] entry:', JSON.stringify(text), '-> norm:', JSON.stringify(norm), '-> chunks:', JSON.stringify(chunks));
+  console.log('[LE] LEAD.src:', LEAD_RE.source);
 
   const items = [];
   for (const chunk of chunks) {

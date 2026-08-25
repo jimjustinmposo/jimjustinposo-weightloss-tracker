@@ -4,6 +4,7 @@ import {
   convertToGrams,
   detectPrep,
   extractMealPrefix,
+  localExtract,
   normalizeAiItems,
   normalizeUnit,
 } from '../src/telegram/textparse.js';
@@ -89,7 +90,7 @@ test('detectPrep finds explicit preparation words', () => {
 
 /* ---------- AI output normalization ---------- */
 
-test('normalizeAiItems strips markdown fences and prose-wrapped arrays safely', () => {
+test('normalizeAiItems validates the AI array safely', () => {
   const { items } = normalizeAiItems([
     { food: 'chicken breast', quantity: 300, unit: 'g' },
     { food: 'egg', quantity: 4, unit: 'piece' },
@@ -110,7 +111,7 @@ test('normalizeAiItems ignores non-array garbage', () => {
 
 /* ---------- rule-based (no-AI) extraction ---------- */
 
-import { localExtract } from '../src/telegram/textparse.js';
+const NL = String.fromCharCode(10); // real newline, immune to file escaping
 
 test('localExtract parses the classic multi-item meal message', () => {
   const { items } = localExtract('300g chicken breast, 4 eggs and 20g salted butter');
@@ -151,12 +152,19 @@ test('localExtract strips filler words and marks missing amounts', () => {
   assert.equal(items[0].food, 'chicken');
   assert.equal(items[0].quantity, null);
 
-  const one = localExtract('had 2 slices of bread')[0];
-  assert.ok(one.quantity >= 2); // "slices" unsupported → unit empty but qty captured
+  // "slices" is not a supported unit → treated as part of the name, qty kept
+  const { items: slicesItems } = localExtract('had 2 slices of bread');
+  assert.deepEqual(slicesItems, [{ food: 'slices of bread', quantity: 2, unit: '' }]);
 });
 
 test('localExtract splits on commas / and / & / newlines', () => {
-  const { items } = localExtract('100g rice\n50g beans & 3 eggs');
-  assert.equal(items.length, 3);
+  const { items } = localExtract('100g rice' + NL + '50g beans & 3 eggs');
+  assert.deepEqual(
+    items.map((i) => [i.food, i.quantity, i.unit]),
+    [
+      ['rice', 100, 'g'],
+      ['beans', 50, 'g'],
+      ['egg', 3, 'piece'],
+    ]
+  );
 });
-
