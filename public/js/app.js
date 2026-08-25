@@ -3,6 +3,7 @@ import { App, profileComplete } from './state.js';
 import { icons, toast, esc, qs } from './util.js';
 import { renderDashboard } from './dashboard.js';
 import { renderFoodsPage } from './foods.js';
+import { renderSteps } from './steps.js';
 import { renderHistory } from './history.js';
 import { renderProfilePage } from './profile.js';
 
@@ -12,6 +13,7 @@ const shell = () => document.getElementById('shell');
 const NAV = [
   { hash: '#/dashboard', label: 'Dashboard', icon: 'home' },
   { hash: '#/foods', label: 'Foods', icon: 'utensils' },
+  { hash: '#/steps', label: 'Steps', icon: 'steps' },
   { hash: '#/history', label: 'History', icon: 'chart' },
   { hash: '#/profile', label: 'Profile', icon: 'user' },
 ];
@@ -142,6 +144,7 @@ function renderRegister() {
 const routes = {
   '#/dashboard': renderDashboard,
   '#/foods': renderFoodsPage,
+  '#/steps': renderSteps,
   '#/history': renderHistory,
   '#/profile': renderProfilePage,
   '#/onboarding': renderProfilePage,

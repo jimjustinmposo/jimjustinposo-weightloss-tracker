@@ -17,6 +17,17 @@ function bmiBadgeClass(bmiValue) {
   return 'bad';
 }
 
+/* Animate a number from 0 to target with an ease-out curve. */
+function countUp(el, target, dur = 900) {
+  const t0 = performance.now();
+  const tick = (now) => {
+    const t = Math.min(1, (now - t0) / dur);
+    el.textContent = fmt(Math.round(target * (1 - Math.pow(1 - t, 3))));
+    if (t < 1) requestAnimationFrame(tick);
+  };
+  requestAnimationFrame(tick);
+}
+
 export function weightModal(onSaved) {
   const { overlay, close } = openModal({
     title: 'Log current weight',
@@ -46,21 +57,23 @@ export function weightModal(onSaved) {
   });
 }
 
-export function stepsModal(onSaved) {
+export function stepsModal(onSaved, entry = null) {
   const goal = App.profile?.step_goal ?? 10000;
+  const editing = !!entry;
   const { overlay, close } = openModal({
-    title: 'Add steps',
+    title: editing ? 'Edit steps' : 'Add steps',
     body: `
       <form id="s-form">
         <div class="form-row">
           <div class="field"><label>Date</label>
-            <input type="date" name="date" value="${todayStr()}" max="${todayStr()}" required /></div>
+            <input type="date" name="date" value="${esc(entry?.log_date ?? todayStr())}" max="${todayStr()}" required /></div>
           <div class="field"><label>Steps</label>
-            <input type="number" name="steps" step="1" min="0" max="200000" placeholder="e.g. 10000" required /></div>
+            <input type="number" name="steps" step="1" min="0" max="200000" placeholder="e.g. 10000"
+              value="${entry?.steps != null ? Number(entry.steps) : ''}" required /></div>
         </div>
         <p class="form-hint">Calories burned are estimated from your height &amp; weight. Daily goal: ${fmt(goal)} steps.</p>
         <br/>
-        <button class="btn block accent" type="submit">${icons.steps} Save Steps</button>
+        <button class="btn block accent" type="submit">${icons.steps} ${editing ? 'Update Steps' : 'Save Steps'}</button>
       </form>`,
   });
   qs('#s-form', overlay).addEventListener('submit', async (e) => {
@@ -69,7 +82,7 @@ export function stepsModal(onSaved) {
     try {
       await api.post('/api/steps', { date: f.date.value, steps: Number(f.steps.value) });
       close();
-      toast('Steps saved');
+      toast(editing ? 'Steps updated' : 'Steps saved');
       onSaved?.();
     } catch (err) {
       toast(err.message, 'error');
@@ -221,6 +234,14 @@ export async function renderDashboard(root) {
       <h3>${icons.utensils} Daily Food Intake Record — ${new Date(date + 'T00:00').toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}</h3>
       ${mealsHtml || '<div class="empty">No food logged yet for this day.</div>'}
     </section>`;
+
+  /* ---- dynamic rings: count the center numbers up while the arcs sweep in ---- */
+  qsa('.ring-wrap', root).forEach((wrapEl) => {
+    const bigEl = qs('.ring-center .big', wrapEl);
+    if (!bigEl) return;
+    const v = Number(String(bigEl.textContent).replace(/[^0-9.-]/g, ''));
+    if (Number.isFinite(v) && v > 0) countUp(bigEl, v);
+  });
 
   /* ---- wiring ---- */
   qs('#dash-date', root).addEventListener('change', (e) => {

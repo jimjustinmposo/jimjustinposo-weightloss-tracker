@@ -87,4 +87,27 @@ app.get('/', async (c) => {
   return c.json({ series });
 });
 
+// Raw logged entries (only days that were saved), newest first — Steps record page.
+app.get('/entries', async (c) => {
+  const userId = c.get('userId');
+  const limit = Math.min(Math.max(Math.round(Number(c.req.query('limit')) || 90), 1), 365);
+  const entries = (
+    await c.env.DB.prepare(
+      'SELECT id, log_date, steps, calories_burned FROM step_logs WHERE user_id = ?1 ORDER BY log_date DESC LIMIT ?2'
+    )
+      .bind(userId, limit)
+      .all<StepRow>()
+  ).results;
+  return c.json({ entries });
+});
+
+app.delete('/:id', async (c) => {
+  const userId = c.get('userId');
+  const id = Number(c.req.param('id'));
+  if (!Number.isInteger(id)) throw new HTTPException(400, { message: 'Invalid entry id.' });
+  const res = await c.env.DB.prepare('DELETE FROM step_logs WHERE id = ?1 AND user_id = ?2').bind(id, userId).run();
+  if (!res.meta.changes) throw new HTTPException(404, { message: 'Entry not found.' });
+  return c.json({ ok: true });
+});
+
 export default app;

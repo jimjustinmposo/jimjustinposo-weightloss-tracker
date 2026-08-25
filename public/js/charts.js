@@ -130,15 +130,19 @@ export function barChart(items, opts = {}) {
 
 /** Circular progress ring (returns wrapper HTML with centered content). */
 export function ring({ pct, size = 128, stroke = 11, color = '#1976D2', big = '', sub = '' }) {
+  let p = Number(pct) || 0;
+  if (p > 1) p /= 100; // accept 0–1 or 0–100 so the arc always reflects real progress
+  p = clamp(p, 0, 1);
   const r = (size - stroke) / 2;
   const C = 2 * Math.PI * r;
-  const off = C * (1 - clamp(pct, 0, 1));
+  const off = C * (1 - p);
   return `
     <div class="ring-wrap" style="width:${size}px">
       <svg viewBox="0 0 ${size} ${size}">
         <circle cx="${size / 2}" cy="${size / 2}" r="${r}" fill="none" stroke="#E8EEF7" stroke-width="${stroke}"/>
-        <circle cx="${size / 2}" cy="${size / 2}" r="${r}" fill="none" stroke="${color}" stroke-width="${stroke}"
-          stroke-linecap="round" stroke-dasharray="${C.toFixed(1)}" stroke-dashoffset="${off.toFixed(1)}"/>
+        <circle class="ring-fg" cx="${size / 2}" cy="${size / 2}" r="${r}" fill="none" stroke="${color}" stroke-width="${stroke}"
+          stroke-linecap="round" stroke-dasharray="${C.toFixed(1)}" stroke-dashoffset="${off.toFixed(1)}"
+          style="--ring-c:${C.toFixed(1)}"/>
       </svg>
       <div class="ring-center"><span class="big">${big}</span><span class="sub">${sub}</span></div>
     </div>`;
