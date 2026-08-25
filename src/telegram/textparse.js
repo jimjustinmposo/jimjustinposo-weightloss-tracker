@@ -184,7 +184,7 @@ export function decideFoodMatch(candidates, prepHint) {
 /* Rule-based extraction fallback (works without any AI provider)      */
 /* ------------------------------------------------------------------ */
 
-const CHUNK_SPLIT = /\s*(?:,|\band\b|\b&\b|\+\n?|\n)\s*/i;
+const CHUNK_SPLIT = /\s*(?:,|\band\b|&|\+)\s*/i;
 const UNIT_ALT = 'kg|kgs|kilo|kilos|kilograms?|gr|gm|g|grams?|ml|oz|ounces?|lb|lbs|pounds?|piece|pieces|pc|pcs|eggs?|serving|servings|portions?';
 const LEAD_RE = new RegExp(`^([0-9]+(?:[.,][0-9]+)?)\\s*(${UNIT_ALT})?\\b\\.?\\s*(.*)$`, 'i');
 const TRAIL_RE = new RegExp(`^(.+?)\\s+([0-9]+(?:[.,][0-9]+)?)\\s*(${UNIT_ALT})\\.?$`, 'i');
@@ -193,13 +193,15 @@ const FILLER_RE = /^(?:i|we|had|have|ate|eat|eaten|drank|took|just|some|a|an|the
 function cleanName(s) {
   let n = String(s).replace(/\s+/g, ' ').trim();
   while (FILLER_RE.test(n)) n = n.replace(FILLER_RE, '');
-  return n.trim();
+  return n.trim().replace(/^of\s+/i, '').trim();
 }
 
-function singularForUnit(unit) {
-  const u = normalizeUnit(unit);
-  if (u === 'piece') return 'piece';
-  if (u === 'serving') return 'serving';
+function singularForUnit(rawUnit) {
+  const u = String(rawUnit ?? '').toLowerCase().trim();
+  if (/^eggs?$/.test(u)) return 'egg';
+  const c = normalizeUnit(u);
+  if (c === 'piece') return 'piece';
+  if (c === 'serving') return 'serving';
   return '';
 }
 
@@ -213,7 +215,12 @@ function singularForUnit(unit) {
 export function localExtract(text) {
   const chunks = String(text ?? '')
     .split(CHUNK_SPLIT)
-    .map((s) => s.trim())
+    .map((s) => {
+      // strip conversational fillers BEFORE pattern matching
+      let c = s.trim();
+      while (FILLER_RE.test(c)) c = c.replace(FILLER_RE, '');
+      return c.trim();
+    })
     .filter(Boolean)
     .slice(0, 12);
 
