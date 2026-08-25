@@ -88,12 +88,14 @@ app.get('/', async (c) => {
 });
 
 // Raw logged entries (only days that were saved), newest first — Steps record page.
+// NOTE: step_logs has a composite PRIMARY KEY (user_id, log_date) — there is no id
+// column, so log_date is the row's unique key.
 app.get('/entries', async (c) => {
   const userId = c.get('userId');
   const limit = Math.min(Math.max(Math.round(Number(c.req.query('limit')) || 90), 1), 365);
   const entries = (
     await c.env.DB.prepare(
-      'SELECT id, log_date, steps, calories_burned FROM step_logs WHERE user_id = ?1 ORDER BY log_date DESC LIMIT ?2'
+      'SELECT log_date, steps, calories_burned FROM step_logs WHERE user_id = ?1 ORDER BY log_date DESC LIMIT ?2'
     )
       .bind(userId, limit)
       .all<StepRow>()
@@ -101,11 +103,12 @@ app.get('/entries', async (c) => {
   return c.json({ entries });
 });
 
-app.delete('/:id', async (c) => {
+// Delete one day's entry, keyed by date (step_logs has no id column).
+app.delete('/:date', async (c) => {
   const userId = c.get('userId');
-  const id = Number(c.req.param('id'));
-  if (!Number.isInteger(id)) throw new HTTPException(400, { message: 'Invalid entry id.' });
-  const res = await c.env.DB.prepare('DELETE FROM step_logs WHERE id = ?1 AND user_id = ?2').bind(id, userId).run();
+  const date = c.req.param('date');
+  if (!isDateStr(date)) throw new HTTPException(400, { message: 'A valid date (YYYY-MM-DD) is required.' });
+  const res = await c.env.DB.prepare('DELETE FROM step_logs WHERE log_date = ?1 AND user_id = ?2').bind(date, userId).run();
   if (!res.meta.changes) throw new HTTPException(404, { message: 'Entry not found.' });
   return c.json({ ok: true });
 });

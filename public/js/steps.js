@@ -32,7 +32,7 @@ export async function renderSteps(root) {
       )
     : emptyChart('No steps logged yet — hit “Add Steps” to get moving!');
 
-  /* ---- record rows ---- */
+  /* ---- record rows (step_logs is keyed by user + date — no id column) ---- */
   const rows = entries
     .map((e) => {
       const hit = Number(e.steps || 0) >= goal;
@@ -44,9 +44,9 @@ export async function renderSteps(root) {
         </div>
         <span class="kcal">${fmt(Number(e.steps))} steps</span>
         ${hit ? '<span class="delta-pill down">✓ goal</span>' : ''}
-        <button class="icon-btn edit-step" data-id="${e.id}" data-date="${esc(e.log_date)}"
+        <button class="icon-btn edit-step" data-date="${esc(e.log_date)}"
           data-steps="${Number(e.steps)}" title="Edit">${icons.pencil}</button>
-        <button class="icon-btn del-step" data-id="${e.id}" title="Delete">${icons.trash}</button>
+        <button class="icon-btn del-step" data-date="${esc(e.log_date)}" title="Delete">${icons.trash}</button>
       </div>`;
     })
     .join('');
@@ -88,7 +88,7 @@ export async function renderSteps(root) {
     btn.addEventListener('click', async () => {
       if (!confirm('Delete this steps entry?')) return;
       try {
-        await api.del(`/api/steps/${btn.dataset.id}`);
+        await api.del(`/api/steps/${encodeURIComponent(btn.dataset.date)}`);
         toast('Entry deleted');
         renderSteps(root);
       } catch (err) {
