@@ -1,6 +1,6 @@
 import api from './api.js';
 import { App } from './state.js';
-import { icons, fmt, prettyDate, qs, qsa } from './util.js';
+import { icons, fmt, esc, toast, prettyDate, qs, qsa } from './util.js';
 import { barChart, emptyChart } from './charts.js';
 import { stepsModal } from './dashboard.js';
 
