@@ -121,10 +121,10 @@ export async function renderDashboard(root) {
         <p>Your daily health snapshot — stay consistent!</p>
       </div>
       <input type="date" id="dash-date" class="date-pick" value="${date}" max="${todayStr()}" />
-      <div class="hero-badges">
-        ${t?.bmi != null ? `<span class="badge ${bmiBadgeClass(t.bmi)}">${icons.chart} BMI <b>${fmt(t.bmi, 1)}</b> · ${esc(t.bmi_category || '')}</span>` : ''}
-        ${t?.tdee != null ? `<span class="badge">${icons.flame} TDEE <b>${fmt(t.tdee)}</b></span>` : ''}
-        ${t?.goal_type ? `<span class="badge">${icons.target} Goal: <b>${esc(String(t.goal_type))}</b> ${t.goal_type !== 'maintain' ? `${fmt(Math.abs(Number(t.weekly_goal_kg) || 0), 2)} kg/wk` : ''}</span>` : ''}
+      <div class="hero-actions">
+        <button class="btn accent" id="qa-food">${icons.plus} Log Food</button>
+        <button class="btn ghost" id="qa-weight">${icons.scale} Log Weight</button>
+        <button class="btn ghost" id="qa-steps">${icons.steps} Add Steps</button>
       </div>
     </section>`;
 
@@ -205,9 +205,11 @@ export async function renderDashboard(root) {
     <br/>
     <section class="card">
       <div class="qa-row">
-        <button class="btn" id="qa-food">${icons.plus} Log Food</button>
-        <button class="btn ghost" id="qa-weight">${icons.scale} Log Weight</button>
-        <button class="btn ghost" id="qa-steps">${icons.steps} Add Steps</button>
+        <div class="qa-badges">
+          ${t?.bmi != null ? `<span class="badge ${bmiBadgeClass(t.bmi)}">${icons.chart} BMI <b>${fmt(t.bmi, 1)}</b> · ${esc(t.bmi_category || '')}</span>` : ''}
+          ${t?.tdee != null ? `<span class="badge">${icons.flame} TDEE <b>${fmt(t.tdee)}</b></span>` : ''}
+          ${t?.goal_type ? `<span class="badge">${icons.target} Goal: <b>${esc(String(t.goal_type))}</b> ${t.goal_type !== 'maintain' ? `${fmt(Math.abs(Number(t.weekly_goal_kg) || 0), 2)} kg/wk` : ''}</span>` : ''}
+        </div>
         ${t ? `<span style="margin-left:auto;align-self:center;font-size:12.5px;color:var(--muted)">
           Daily targets — kcal <b>${fmt(calorieTarget)}</b> · P <b>${fmt(t.protein_target)}g</b> · C <b>${fmt(t.carb_target)}g</b> · F <b>${fmt(t.fat_target)}g</b></span>` : ''}
       </div>

@@ -115,7 +115,7 @@ main#view {
 .hero .hi { flex: 1 1 240px; min-width: 200px; }
 .hero .hi h2 { font-size: clamp(19px, 3vw, 24px); margin-bottom: 2px; }
 .hero .hi p { opacity: .92; font-size: 13.5px; }
-.hero-badges { display: flex; flex-wrap: wrap; gap: 8px; }
+.hero-actions { display: flex; flex-wrap: wrap; gap: 8px; }
 .badge {
   display: inline-flex; align-items: center; gap: 6px;
   padding: 7px 13px; border-radius: 999px;
@@ -267,7 +267,10 @@ main#view {
 .result-gram input { width: 90px; }
 .result-gram select { flex: 1; }
 
-.qa-row { display: flex; flex-wrap: wrap; gap: 10px; }
+.qa-row { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+.qa-badges { display: flex; flex-wrap: wrap; gap: 8px; }
+/* badges moved out of the blue hero onto a plain card — lighten their chrome */
+.qa-badges .badge:not(.ok):not(.warn):not(.bad) { background: var(--bg); border-color: var(--line); }
 .charts-grid { display: grid; gap: 16px; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); }
 .chart { width: 100%; height: auto; }
 .chart text { font-family: inherit; }
