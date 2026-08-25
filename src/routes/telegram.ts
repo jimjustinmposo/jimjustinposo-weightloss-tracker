@@ -14,6 +14,7 @@ import {
   formatMealAnalysis,
   formatSaved,
   formatToday,
+  localExtract,
   normalizeAiItems,
   scaleMacros,
   sumNutrition,
@@ -462,29 +463,24 @@ async function handleMealText(
     return;
   }
 
-  let parsed: Awaited<ReturnType<typeof extractFoods>>;
+  let parsed: Awaited<ReturnType<typeof extractFoods>> | null = null;
+  let aiItemsRaw: Array<{ food: string; quantity: number | null; unit: string }> = [];
   try {
     parsed = await extractFoods(env, prefix.rest);
+    aiItemsRaw = normalizeAiItems(parsed.items).items;
   } catch (e) {
-    if (e instanceof AiUnavailableError) {
-      await sendMessage(
-        env,
-        chatId,
-        '🤖 The food-analysis AI is unavailable right now.\n' +
-          `(${e.message})\n\n` +
-          'Manual logging on the web dashboard still works fine.'
-      );
-      return;
-    }
-    throw e;
+    if (!(e instanceof AiUnavailableError)) throw e;
+    // No AI configured / unreachable → deterministic built-in parser takes over.
+    aiItemsRaw = [];
   }
-
-  const { items: aiItemsRaw } = normalizeAiItems(parsed.items);
+  if (!aiItemsRaw.length) {
+    aiItemsRaw = localExtract(prefix.rest).items;
+  }
   if (!aiItemsRaw.length) {
     await sendMessage(env, chatId, "🤔 I couldn't find any food in that message. Try something like:\n300g chicken breast and 4 eggs");
     return;
   }
-  const meal = ((prefix.meal ?? parsed.meal ?? 'snack') as MealType);
+  const meal = ((prefix.meal ?? parsed?.meal ?? 'snack') as MealType);
 
   /* Resolve every item against the EXISTING catalog — nutrition never comes from the AI. */
   const items: PendingItem[] = [];

@@ -22,6 +22,11 @@ export declare function normalizeAiItems(raw: unknown): {
   items: Array<{ food: string; quantity: number | null; unit: string }>;
 };
 
+/** Rule-based extractor (no AI needed). Same item shape as normalizeAiItems. */
+export declare function localExtract(text: unknown): {
+  items: Array<{ food: string; quantity: number | null; unit: string }>;
+};
+
 export type FoodCandidate = {
   id: number;
   name: string;

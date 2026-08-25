@@ -181,6 +181,80 @@ export function decideFoodMatch(candidates, prepHint) {
 }
 
 /* ------------------------------------------------------------------ */
+/* Rule-based extraction fallback (works without any AI provider)      */
+/* ------------------------------------------------------------------ */
+
+const CHUNK_SPLIT = /\s*(?:,|\band\b|\b&\b|\+\n?|\n)\s*/i;
+const UNIT_ALT = 'kg|kgs|kilo|kilos|kilograms?|gr|gm|g|grams?|ml|oz|ounces?|lb|lbs|pounds?|piece|pieces|pc|pcs|eggs?|serving|servings|portions?';
+const LEAD_RE = new RegExp(`^([0-9]+(?:[.,][0-9]+)?)\\s*(${UNIT_ALT})?\\b\\.?\\s*(.*)$`, 'i');
+const TRAIL_RE = new RegExp(`^(.+?)\\s+([0-9]+(?:[.,][0-9]+)?)\\s*(${UNIT_ALT})\\.?$`, 'i');
+const FILLER_RE = /^(?:i|we|had|have|ate|eat|eaten|drank|took|just|some|a|an|the|my|about|around|roughly)\b[\s-]*/i;
+
+function cleanName(s) {
+  let n = String(s).replace(/\s+/g, ' ').trim();
+  while (FILLER_RE.test(n)) n = n.replace(FILLER_RE, '');
+  return n.trim();
+}
+
+function singularForUnit(unit) {
+  const u = normalizeUnit(unit);
+  if (u === 'piece') return 'piece';
+  if (u === 'serving') return 'serving';
+  return '';
+}
+
+/**
+ * Deterministic fallback extractor used when no AI provider is configured
+ * (or the AI call fails). Understands the common patterns:
+ *   "300g chicken breast, 4 eggs and 20g salted butter"
+ *   "0.5kg pork belly" · "10 oz ribeye" · "chicken breast 300g"
+ * Items without any amount come back with quantity:null so the bot can ask.
+ */
+export function localExtract(text) {
+  const chunks = String(text ?? '')
+    .split(CHUNK_SPLIT)
+    .map((s) => s.trim())
+    .filter(Boolean)
+    .slice(0, 12);
+
+  const items = [];
+  for (const chunk of chunks) {
+    let m = LEAD_RE.exec(chunk);
+    if (m && m[3] !== undefined) {
+      const name = cleanName(m[3]);
+      const qty = Number(m[1].replace(',', '.'));
+      if (name) {
+        items.push({
+          food: name || singularForUnit(m[2]),
+          quantity: Number.isFinite(qty) ? qty : null,
+          unit: normalizeUnit(m[2]) ?? '',
+        });
+        continue;
+      }
+      // "4 eggs" — unit word doubles as the food name
+      if (!name && m[2]) {
+        items.push({ food: singularForUnit(m[2]) || m[2].toLowerCase(), quantity: qty, unit: normalizeUnit(m[2]) ?? '' });
+        continue;
+      }
+    }
+
+    m = TRAIL_RE.exec(chunk);
+    if (m) {
+      const name = cleanName(m[1]);
+      const qty = Number(m[2].replace(',', '.'));
+      if (name) {
+        items.push({ food: name, quantity: Number.isFinite(qty) ? qty : null, unit: normalizeUnit(m[3]) ?? '' });
+        continue;
+      }
+    }
+
+    const bare = cleanName(chunk);
+    if (bare) items.push({ food: bare, quantity: null, unit: '' });
+  }
+  return { items };
+}
+
+/* ------------------------------------------------------------------ */
 /* Nutrition math (mirrors logs.ts exactly)                            */
 /* ------------------------------------------------------------------ */
 

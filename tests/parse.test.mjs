@@ -107,3 +107,56 @@ test('normalizeAiItems ignores non-array garbage', () => {
   assert.equal(normalizeAiItems(null).items.length, 0);
   assert.equal(normalizeAiItems('hello').items.length, 0);
 });
+
+/* ---------- rule-based (no-AI) extraction ---------- */
+
+import { localExtract } from '../src/telegram/textparse.js';
+
+test('localExtract parses the classic multi-item meal message', () => {
+  const { items } = localExtract('300g chicken breast, 4 eggs and 20g salted butter');
+  assert.deepEqual(
+    items.map((i) => [i.food, i.quantity, i.unit]),
+    [
+      ['chicken breast', 300, 'g'],
+      ['egg', 4, 'piece'],
+      ['salted butter', 20, 'g'],
+    ]
+  );
+});
+
+test('localExtract handles kg, oz, ml and trailing-unit phrasing', () => {
+  const a = localExtract('0.5kg pork belly').items[0];
+  assert.equal(a.food, 'pork belly');
+  assert.equal(a.quantity, 0.5);
+  assert.equal(a.unit, 'kg');
+
+  const b = localExtract('10 oz ribeye').items[0];
+  assert.equal(b.food, 'ribeye');
+  assert.equal(b.quantity, 10);
+  assert.equal(b.unit, 'oz');
+
+  const c = localExtract('chicken breast 300g').items[0];
+  assert.equal(c.food, 'chicken breast');
+  assert.equal(c.quantity, 300);
+  assert.equal(c.unit, 'g');
+
+  const d = localExtract('250ml milk').items[0];
+  assert.equal(d.quantity, 250);
+  assert.equal(d.unit, 'ml');
+});
+
+test('localExtract strips filler words and marks missing amounts', () => {
+  const { items } = localExtract('I ate some chicken');
+  assert.equal(items.length, 1);
+  assert.equal(items[0].food, 'chicken');
+  assert.equal(items[0].quantity, null);
+
+  const one = localExtract('had 2 slices of bread')[0];
+  assert.ok(one.quantity >= 2); // "slices" unsupported → unit empty but qty captured
+});
+
+test('localExtract splits on commas / and / & / newlines', () => {
+  const { items } = localExtract('100g rice\n50g beans & 3 eggs');
+  assert.equal(items.length, 3);
+});
+
