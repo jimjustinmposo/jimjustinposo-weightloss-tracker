@@ -3,9 +3,23 @@ import { App } from './state.js';
 import { icons, fmt, esc, toast, openModal, todayStr, qs, qsa } from './util.js';
 import { lineChart, barChart, ring, macroBar, emptyChart } from './charts.js';
 import { foodPickerModal } from './foods.js';
+import { DIET_OPTIONS } from './profile.js';
 
 function mealLabel(m) {
   return { breakfast: 'Breakfast', lunch: 'Lunch', dinner: 'Dinner', snack: 'Snacks' }[m] || m;
+}
+
+/* Label + hint for the profile's chosen diet — reuses the Profile page options so
+   the dashboard indicator always matches exactly what the user picked. */
+function dietInfo(value) {
+  if (!value) return null;
+  const found = DIET_OPTIONS.find(([v]) => v === value);
+  if (found) return { label: found[1], hint: found[2] };
+  // Graceful fallback for unknown values: "my_diet" → "My Diet"
+  return {
+    label: String(value).replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase()),
+    hint: '',
+  };
 }
 
 function bmiBadgeClass(bmiValue) {
@@ -143,6 +157,12 @@ export async function renderDashboard(root) {
   const stepPct = stepGoal ? (d.steps / stepGoal) * 100 : 0;
   const firstName = (App.user?.name || '').split(' ')[0] || 'there';
 
+  /* Diet indicator — shows which macro plan is active, e.g. "Macros today · Keto". */
+  const diet = dietInfo(App.profile?.diet_type);
+  const dietPill = diet
+    ? `<span class="diet-pill"${diet.hint ? ` title="${esc(diet.hint)}"` : ''}>${esc(diet.label)}</span>`
+    : '';
+
   const heroHtml = `
     <section class="card hero">
       <div class="hi">
@@ -176,7 +196,7 @@ export async function renderDashboard(root) {
         <p style="font-size:12px;color:var(--muted);margin-top:8px">≈ <b>${fmt(d.burned_steps)}</b> kcal burned walking</p>
       </div>
       <div class="card">
-        <h3>${icons.utensils} Macros today</h3>
+        <h3>${icons.utensils} Macros today ${dietPill}</h3>
         ${macroBar('Protein', consumed.protein, Number(t?.protein_target ?? 0), '#1976D2')}
         ${macroBar('Carbs', consumed.carbs, Number(t?.carb_target ?? 0), '#FBC02D')}
         ${macroBar('Fat', consumed.fat, Number(t?.fat_target ?? 0), '#E53935')}

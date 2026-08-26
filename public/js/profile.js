@@ -10,8 +10,9 @@ const ACTIVITY_OPTIONS = [
   ['athlete', 'Athlete — training twice a day / physical job'],
 ];
 
-/* Diet styles that reshape the macro split (mirrors server-side dietMacros). */
-const DIET_OPTIONS = [
+/* Diet styles that reshape the macro split (mirrors server-side dietMacros).
+   Exported so other views (e.g. the dashboard diet indicator) reuse the same labels. */
+export const DIET_OPTIONS = [
   ['normal', 'Normal / Balanced', 'balanced split'],
   ['lowcarb', 'Low Carb', '~15% of calories from carbs'],
   ['keto', 'Keto', '20–30 g carbs · high fat'],
