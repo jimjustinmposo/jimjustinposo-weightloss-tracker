@@ -71,7 +71,7 @@ app.put('/', async (c) => {
     dietType,
   });
 
-  await c.env.DB.prepare(
+  const insertWithDiet = c.env.DB.prepare(
     `INSERT INTO profiles (
        user_id, name, age, gender, height_cm, activity_level, start_weight, current_weight,
        goal_type, weekly_goal_kg, step_goal, diet_type, bmr, tdee, bmi, bmi_category,
@@ -86,15 +86,50 @@ app.put('/', async (c) => {
        bmr=excluded.bmr, tdee=excluded.tdee, bmi=excluded.bmi, bmi_category=excluded.bmi_category,
        calorie_target=excluded.calorie_target, protein_target=excluded.protein_target,
        carb_target=excluded.carb_target, fat_target=excluded.fat_target,
-       updated_at=datetime('now')`
-  )
-    .bind(
-      userId, name, age, gender, heightCm, activityLevel, startWeight, currentWeight,
-      goalType, weeklyGoalKg, stepGoal, dietType,
-      targets.bmr, targets.tdee, targets.bmi, targets.bmi_category,
-      targets.calorie_target, targets.protein_target, targets.carb_target, targets.fat_target
-    )
-    .run();
+       updated_at=datetime('now')`);
+
+  const insertLegacy = c.env.DB.prepare(
+    `INSERT INTO profiles (
+       user_id, name, age, gender, height_cm, activity_level, start_weight, current_weight,
+       goal_type, weekly_goal_kg, step_goal, bmr, tdee, bmi, bmi_category,
+       calorie_target, protein_target, carb_target, fat_target, updated_at
+     ) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19, datetime('now'))
+     ON CONFLICT(user_id) DO UPDATE SET
+       name=excluded.name, age=excluded.age, gender=excluded.gender, height_cm=excluded.height_cm,
+       activity_level=excluded.activity_level, start_weight=excluded.start_weight,
+       current_weight=excluded.current_weight, goal_type=excluded.goal_type,
+       weekly_goal_kg=excluded.weekly_goal_kg, step_goal=excluded.step_goal,
+       bmr=excluded.bmr, tdee=excluded.tdee, bmi=excluded.bmi, bmi_category=excluded.bmi_category,
+       calorie_target=excluded.calorie_target, protein_target=excluded.protein_target,
+       carb_target=excluded.carb_target, fat_target=excluded.fat_target,
+       updated_at=datetime('now')`);
+
+  try {
+    await insertWithDiet
+      .bind(
+        userId, name, age, gender, heightCm, activityLevel, startWeight, currentWeight,
+        goalType, weeklyGoalKg, stepGoal, dietType,
+        targets.bmr, targets.tdee, targets.bmi, targets.bmi_category,
+        targets.calorie_target, targets.protein_target, targets.carb_target, targets.fat_target
+      )
+      .run();
+  } catch (err) {
+    const msg = String((err as Error)?.message ?? '');
+    if (/diet_type|no such column/i.test(msg)) {
+      /* Remote schema not yet migrated — save anyway (without the diet column)
+         instead of failing the whole profile update with a 500. */
+      await insertLegacy
+        .bind(
+          userId, name, age, gender, heightCm, activityLevel, startWeight, currentWeight,
+          goalType, weeklyGoalKg, stepGoal,
+          targets.bmr, targets.tdee, targets.bmi, targets.bmi_category,
+          targets.calorie_target, targets.protein_target, targets.carb_target, targets.fat_target
+        )
+        .run();
+    } else {
+      throw new HTTPException(500, { message: 'Could not save your profile. Please try again.' });
+    }
+  }
 
   // Keep today's weight log in sync with the profile weight.
   const today = isDateStr(body.today) ? body.today : null;
