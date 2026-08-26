@@ -24,7 +24,7 @@
 }
 
 * { margin: 0; padding: 0; box-sizing: border-box; }
-html { -webkit-text-size-adjust: 100%; }
+html { -webkit-text-size-adjust: 100%; scroll-padding-top: calc(var(--nav-h) + 10px); }
 body {
   font-family: "Segoe UI", system-ui, -apple-system, Roboto, "Helvetica Neue", Arial, sans-serif;
   background: var(--bg);
@@ -75,9 +75,17 @@ input, select { font: inherit; }
   transition: background .15s;
 }
 .icon-btn:hover { background: rgba(255,255,255,.16); }
-main#view {
+/* ---------- Page container ---------- */
+/* NOTE: #view is a <div id="view"> in index.html (not a <main> element).
+   Never scope these rules as `main#view` — the selector would silently stop
+   matching, the bottom padding would vanish, and the fixed mobile menu would
+   overlap/click-block the last rows of content (e.g. the Snacks group). */
+#view {
   max-width: 1180px; margin: 0 auto;
-  padding: clamp(14px, 3vw, 28px) clamp(14px, 4vw, 28px) calc(var(--nav-h) + env(safe-area-inset-bottom) + 26px);
+  /* Fallback for browsers without env() support… */
+  padding: clamp(14px, 3vw, 28px) clamp(14px, 4vw, 28px) calc(var(--nav-h) + 30px);
+  /* …then safe-area-aware bottom padding so nothing hides under the fixed mobile nav. */
+  padding-bottom: calc(var(--nav-h) + env(safe-area-inset-bottom, 0px) + 30px);
 }
 /* ---------- Bottom navigation (mobile) ---------- */
 .bottomnav {
@@ -208,7 +216,7 @@ main#view {
 .modal-head h3 { font-size: 16.5px; }
 .modal-head .icon-btn { color: var(--muted); background: var(--bg); }
 .modal-head .icon-btn:hover { background: var(--line); }
-.modal-body { padding: 6px 20px 22px; overflow-y: auto; }
+.modal-body { padding: 6px 20px 22px; overflow-y: auto; padding-bottom: calc(22px + env(safe-area-inset-bottom, 0px)); }
 
 /* ---------- Toast ---------- */
 #toast-root { position: fixed; top: 14px; left: 50%; transform: translateX(-50%); z-index: 200; display: flex; flex-direction: column; gap: 8px; width: min(420px, calc(100vw - 28px)); }
@@ -310,7 +318,7 @@ details.day summary .day-totals { margin-left: auto; font-size: 12px; color: var
   .userchip .uname { display: none; }
   .bottomnav { display: flex; }
   .card { padding: 16px; }
-  main#view { padding-top: 14px; }
+  #view { padding-top: 14px; }
 }
 
 
