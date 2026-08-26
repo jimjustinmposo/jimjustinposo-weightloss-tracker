@@ -157,10 +157,12 @@ export async function renderDashboard(root) {
   const stepPct = stepGoal ? (d.steps / stepGoal) * 100 : 0;
   const firstName = (App.user?.name || '').split(' ')[0] || 'there';
 
-  /* Diet indicator — shows which macro plan is active, e.g. "Macros today · Keto". */
-  const diet = dietInfo(App.profile?.diet_type);
-  const dietPill = diet
-    ? `<span class="diet-pill"${diet.hint ? ` title="${esc(diet.hint)}"` : ''}>${esc(diet.label)}</span>`
+  /* Diet indicator — plain-text label of the active plan, e.g. "Macros today - Keto".
+     Falls back to 'normal' when diet_type is missing (legacy/un-migrated DB rows),
+     so the chosen plan is ALWAYS visible on the dashboard. */
+  const diet = dietInfo(d.profile?.diet_type || 'normal');
+  const dietSuffix = diet
+    ? `- <span class="diet-active"${diet.hint ? ` title="${esc(diet.hint)}"` : ''}>${esc(diet.label)}</span>`
     : '';
 
   const heroHtml = `
@@ -196,7 +198,7 @@ export async function renderDashboard(root) {
         <p style="font-size:12px;color:var(--muted);margin-top:8px">≈ <b>${fmt(d.burned_steps)}</b> kcal burned walking</p>
       </div>
       <div class="card">
-        <h3>${icons.utensils} Macros today ${dietPill}</h3>
+        <h3>${icons.utensils} Macros today ${dietSuffix}</h3>
         ${macroBar('Protein', consumed.protein, Number(t?.protein_target ?? 0), '#1976D2')}
         ${macroBar('Carbs', consumed.carbs, Number(t?.carb_target ?? 0), '#FBC02D')}
         ${macroBar('Fat', consumed.fat, Number(t?.fat_target ?? 0), '#E53935')}

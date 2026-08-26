@@ -296,14 +296,8 @@ body.app-shell #view {
 .delta-pill.down { color: var(--success); background: rgba(67,160,71,.12); }
 .delta-pill.up { color: var(--danger); background: rgba(229,57,53,.1); }
 
-/* Diet indicator next to "Macros today" on the dashboard (e.g. Keto / Low Carb) */
-.diet-pill {
-  display: inline-flex; align-items: center;
-  font-size: 11px; font-weight: 800; letter-spacing: .02em; text-transform: none;
-  padding: 3px 10px; border-radius: 999px; white-space: nowrap;
-  color: var(--primary); background: rgba(25,118,210,.1);
-  border: 1px solid rgba(25,118,210,.28); cursor: help;
-}
+/* Diet name next to "Macros today" on the dashboard (e.g. "Macros today - Keto") */
+.diet-active { color: var(--primary); cursor: help; }
 
 details.day { border-bottom: 1px solid var(--line); }
 details.day:last-child { border-bottom: none; }
