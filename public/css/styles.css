@@ -41,8 +41,12 @@ input, select { font: inherit; }
 .ic { flex: none; }
 
 /* ---------- Layout shell ---------- */
+/* FIXED, not sticky: the header lives inside #shell, whose height equals its own
+   content — `position: sticky` had nothing to stick within, so the menu scrolled
+   away on desktop. Fixed pins it to the viewport permanently; `body.app-shell
+   #view` reserves matching space beneath it. */
 #shell .topbar {
-  position: sticky; top: 0; z-index: 50;
+  position: fixed; top: 0; left: 0; right: 0; z-index: 50;
   display: flex; align-items: center; gap: 18px;
   padding: 0 clamp(14px, 4vw, 32px);
   height: var(--nav-h);
@@ -86,6 +90,11 @@ input, select { font: inherit; }
   padding: clamp(14px, 3vw, 28px) clamp(14px, 4vw, 28px) calc(var(--nav-h) + 30px);
   /* …then safe-area-aware bottom padding so nothing hides under the fixed mobile nav. */
   padding-bottom: calc(var(--nav-h) + env(safe-area-inset-bottom, 0px) + 30px);
+}
+/* Logged-in shell has a fixed top bar — push page content below it.
+   (Auth pages have no top bar, so they keep their normal centered layout.) */
+body.app-shell #view {
+  padding-top: calc(var(--nav-h) + clamp(14px, 3vw, 28px));
 }
 /* ---------- Bottom navigation (mobile) ---------- */
 .bottomnav {
@@ -318,7 +327,7 @@ details.day summary .day-totals { margin-left: auto; font-size: 12px; color: var
   .userchip .uname { display: none; }
   .bottomnav { display: flex; }
   .card { padding: 16px; }
-  #view { padding-top: 14px; }
+  body.app-shell #view { padding-top: calc(var(--nav-h) + 14px); }
 }
 
 

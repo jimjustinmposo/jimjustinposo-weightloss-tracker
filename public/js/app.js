@@ -21,6 +21,8 @@ const NAV = [
 function buildShell() {
   if (shell().dataset.built) return;
   const name = App.user?.name || App.user?.email?.split('@')[0] || '';
+  /* Tells the CSS a fixed top bar exists → #view reserves space beneath it. */
+  document.body.classList.add('app-shell');
   shell().innerHTML = `
     <header class="topbar">
       <div class="brand">${icons.heart}<span>Develop by Jim Justin Poso<small>Weightloss Tracker</small></span></div>
@@ -44,6 +46,7 @@ function buildShell() {
     } catch { /* ignore */ }
     App.user = null;
     App.profile = null;
+    document.body.classList.remove('app-shell');
     delete shell().dataset.built;
     shell().innerHTML = '';
     location.hash = '#/login';
@@ -72,6 +75,7 @@ function brandHtml(title, sub) {
 function renderLogin() {
   shell().innerHTML = '';
   delete shell().dataset.built;
+  document.body.classList.remove('app-shell');
   view().innerHTML = `
     <div class="auth-wrap"><div class="auth-card"><div class="card">
       ${brandHtml('Welcome back', 'Sign in to continue your journey')}
@@ -105,6 +109,7 @@ function renderLogin() {
 function renderRegister() {
   shell().innerHTML = '';
   delete shell().dataset.built;
+  document.body.classList.remove('app-shell');
   view().innerHTML = `
     <div class="auth-wrap"><div class="auth-card"><div class="card">
       ${brandHtml('Create your account', 'Start tracking weight, food & steps today')}
