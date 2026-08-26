@@ -1,4 +1,4 @@
-import type { ActivityLevel, Gender, GoalType } from './types';
+import type { ActivityLevel, DietType, Gender, GoalType } from './types';
 
 /** Standard activity multipliers used to derive TDEE from BMR. */
 export const ACTIVITY_FACTORS: Record<ActivityLevel, number> = {
@@ -63,15 +63,71 @@ export type TargetInput = {
   activityLevel: ActivityLevel;
   goalType: GoalType;
   weeklyGoalKg: number;
+  dietType: DietType;
 };
+
+export type MacroSplit = {
+  protein_target: number;
+  carb_target: number;
+  fat_target: number;
+};
+
+/**
+ * Shape the daily protein/carb/fat gram targets for the chosen diet style.
+ * Calories stay fixed (from TDEE ± deficit) — only the macro split changes:
+ *  - normal         : protein by goal (g/kg), fat ≈ 27% of kcal, carbs fill the rest
+ *  - lowcarb        : protein by goal, carbs ≈ 15% of kcal, fat fills the rest
+ *  - keto           : carbs ≈ 20–30 g, protein capped ≈ 30% of kcal, fat fills the rest
+ *  - carnivore      : zero carb, high protein ≈ 2.2 g/kg, fat fills the rest
+ *  - omad_carnivore : same split as carnivore (eaten in a single meal)
+ */
+export function dietMacros(
+  calorieTarget: number,
+  weightKg: number,
+  goalType: GoalType,
+  dietType: DietType
+): MacroSplit {
+  const r5 = (v: number) => Math.round(v / 5) * 5;
+  const perKg = goalType === 'lose' ? 2.0 : goalType === 'gain' ? 1.8 : 1.6;
+  const baseProtein = Math.max(40, r5(perKg * weightKg));
+
+  switch (dietType) {
+    case 'lowcarb': {
+      const protein = baseProtein;
+      const carbs = Math.max(30, r5((calorieTarget * 0.15) / 4));
+      const fat = Math.max(30, r5((calorieTarget - protein * 4 - carbs * 4) / 9));
+      return { protein_target: protein, carb_target: carbs, fat_target: fat };
+    }
+    case 'keto': {
+      const carbs = Math.max(20, Math.min(r5((calorieTarget * 0.05) / 4), 30));
+      const protein = Math.min(baseProtein, Math.max(40, r5((calorieTarget * 0.3) / 4)));
+      const fat = Math.max(40, r5((calorieTarget - protein * 4 - carbs * 4) / 9));
+      return { protein_target: protein, carb_target: carbs, fat_target: fat };
+    }
+    case 'carnivore':
+    case 'omad_carnivore': {
+      const protein = Math.max(60, r5(weightKg * 2.2));
+      const carbs = 0;
+      const fat = Math.max(40, r5((calorieTarget - protein * 4) / 9));
+      return { protein_target: protein, carb_target: carbs, fat_target: fat };
+    }
+    default: {
+      // normal — original balanced split
+      const protein = baseProtein;
+      const fat = Math.max(30, r5((calorieTarget * 0.27) / 9));
+      const carbs = Math.max(30, r5((calorieTarget - protein * 4 - fat * 9) / 4));
+      return { protein_target: protein, carb_target: carbs, fat_target: fat };
+    }
+  }
+}
 
 /**
  * Derive daily calorie + macro targets from a user profile.
  *  - BMR via Mifflin-St Jeor, TDEE via activity factor
  *  - daily deficit/surplus = weeklyGoalKg × 7700 ÷ 7 (capped at ±1.5 kg/wk)
  *  - calorie floor 1200 (female) / 1500 (male|other)
- *  - protein g/kg: lose 2.0 · gain 1.8 · maintain 1.6
- *  - fat ≈ 27% of calories, carbs fill the remainder
+ *  - macro split shaped by dietType (see dietMacros): normal / lowcarb /
+ *    keto / carnivore / omad_carnivore
  */
 export function computeTargets(input: TargetInput): Targets {
   const bmrValue = calcBmr(input.weightKg, input.heightCm, input.age, input.gender);
@@ -87,13 +143,7 @@ export function computeTargets(input: TargetInput): Targets {
   const rawCalories = tdee + (signedWeekly < 0 ? -dailyDelta : dailyDelta);
   const calorieTarget = Math.round(Math.max(rawCalories, floor) / 10) * 10;
 
-  const proteinPerKg = input.goalType === 'lose' ? 2.0 : input.goalType === 'gain' ? 1.8 : 1.6;
-  const proteinTarget = Math.max(40, Math.round((proteinPerKg * input.weightKg) / 5) * 5);
-  const fatTarget = Math.max(30, Math.round(((calorieTarget * 0.27) / 9) / 5) * 5);
-  const carbTarget = Math.max(
-    30,
-    Math.round(((calorieTarget - proteinTarget * 4 - fatTarget * 9) / 4) / 5) * 5
-  );
+  const macros = dietMacros(calorieTarget, input.weightKg, input.goalType, input.dietType ?? 'normal');
 
   const bmiValue = calcBmi(input.weightKg, input.heightCm);
   return {
@@ -102,9 +152,9 @@ export function computeTargets(input: TargetInput): Targets {
     bmi: Math.round(bmiValue * 10) / 10,
     bmi_category: bmiCategory(bmiValue),
     calorie_target: calorieTarget,
-    protein_target: proteinTarget,
-    carb_target: carbTarget,
-    fat_target: fatTarget,
+    protein_target: macros.protein_target,
+    carb_target: macros.carb_target,
+    fat_target: macros.fat_target,
     weekly_rate_kg: Math.round(signedWeekly * 100) / 100,
   };
 }

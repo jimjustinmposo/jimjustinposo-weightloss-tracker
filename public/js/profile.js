@@ -10,6 +10,15 @@ const ACTIVITY_OPTIONS = [
   ['athlete', 'Athlete — training twice a day / physical job'],
 ];
 
+/* Diet styles that reshape the macro split (mirrors server-side dietMacros). */
+const DIET_OPTIONS = [
+  ['normal', 'Normal / Balanced', 'balanced split'],
+  ['lowcarb', 'Low Carb', '~15% of calories from carbs'],
+  ['keto', 'Keto', '20–30 g carbs · high fat'],
+  ['carnivore', 'Carnivore', '0 g carbs · high protein & fat'],
+  ['omad_carnivore', 'OMAD Carnivore', '0 g carbs · eat all targets in ONE meal'],
+];
+
 /* Frontend mirror of the server-side calculations for instant preview. */
 function preview(p) {
   const bmr = (() => {
@@ -25,10 +34,35 @@ function preview(p) {
   const floor = p.gender === 'female' ? 1200 : 1500;
   const calories = Math.max(tdee + (weekly < 0 ? -delta : delta), floor);
   const calTarget = Math.round(calories / 10) * 10;
+
+  /* Macro split per diet style — mirrors dietMacros() in src/calc.ts. */
+  const r5 = (v) => Math.round(v / 5) * 5;
   const perKg = p.goal === 'lose' ? 2.0 : p.goal === 'gain' ? 1.8 : 1.6;
-  const protein = Math.max(40, Math.round((perKg * p.weight) / 5) * 5);
-  const fat = Math.max(30, Math.round(((calTarget * 0.27) / 9) / 5) * 5);
-  const carbs = Math.max(30, Math.round(((calTarget - protein * 4 - fat * 9) / 4) / 5) * 5);
+  const baseProtein = Math.max(40, r5(perKg * p.weight));
+  let protein, carbs, fat;
+  switch (p.diet) {
+    case 'lowcarb':
+      protein = baseProtein;
+      carbs = Math.max(30, r5((calTarget * 0.15) / 4));
+      fat = Math.max(30, r5((calTarget - protein * 4 - carbs * 4) / 9));
+      break;
+    case 'keto':
+      carbs = Math.max(20, Math.min(r5((calTarget * 0.05) / 4), 30));
+      protein = Math.min(baseProtein, Math.max(40, r5((calTarget * 0.3) / 4)));
+      fat = Math.max(40, r5((calTarget - protein * 4 - carbs * 4) / 9));
+      break;
+    case 'carnivore':
+    case 'omad_carnivore':
+      protein = Math.max(60, r5(p.weight * 2.2));
+      carbs = 0;
+      fat = Math.max(40, r5((calTarget - protein * 4) / 9));
+      break;
+    default: // normal
+      protein = baseProtein;
+      fat = Math.max(30, r5((calTarget * 0.27) / 9));
+      carbs = Math.max(30, r5((calTarget - protein * 4 - fat * 9) / 4));
+  }
+
   const hM = p.height / 100;
   const bmiV = hM > 0 ? p.weight / (hM * hM) : 0;
   return { bmr: Math.round(bmr), tdee: Math.round(tdee), calTarget, protein, carbs, fat,
@@ -100,6 +134,12 @@ export function renderProfilePage(root) {
         <br/>
         <div class="card">
           <h3>${icons.flame} Live Target Preview</h3>
+          <div class="field"><label>Diet / Macro plan</label>
+            <select id="diet-select">
+              ${DIET_OPTIONS.map(([v, l]) => `<option value="${v}" ${(p.diet_type ?? 'normal') === v ? 'selected' : ''}>${l}</option>`).join('')}
+            </select>
+            <p class="form-hint">Pick your diet — macros below reshape instantly. Save the profile to apply it everywhere.</p>
+          </div>
           <div id="pv" class="grid grid-c2"></div>
         </div>
         <br/>
@@ -119,11 +159,13 @@ export function renderProfilePage(root) {
 
   function refreshPreview() {
     const f = new FormData(form);
+    const dietSel = qs('#diet-select', root);
+    const dietInfo = DIET_OPTIONS.find(([v]) => v === dietSel.value) || DIET_OPTIONS[0];
     const vals = {
       age: Number(f.get('age')), height: Number(f.get('height_cm')),
       weight: Number(f.get('current_weight')), gender: f.get('gender'),
       activity: f.get('activity_level'), goal: f.get('goal_type'),
-      weekly: Number(f.get('weekly_goal_kg')),
+      weekly: Number(f.get('weekly_goal_kg')), diet: dietSel.value,
     };
     if (![vals.age, vals.height, vals.weight].every(Number.isFinite) || !(vals.age > 0)) {
       pv.innerHTML = '<div class="empty">Fill in your age, height &amp; weight to see targets.</div>';
@@ -134,7 +176,8 @@ export function renderProfilePage(root) {
       <div><b>BMR:</b> ${fmt(t.bmr)} kcal · <b>TDEE:</b> ${fmt(t.tdee)} kcal</div>
       <div><b>BMI:</b> ${t.bmi} (${bmiCat(t.bmi)})</div>
       <div><b>Daily calories:</b> ${fmt(t.calTarget)} kcal <span style="color:var(--muted)">(${t.weekly === 0 ? 'maintain' : `${t.weekly > 0 ? '+' : ''}${t.weekly} kg/wk`})</span></div>
-      <div><b>Macros:</b> P ${fmt(t.protein)} g · C ${fmt(t.carbs)} g · F ${fmt(t.fat)} g</div>`;
+      <div><b>Macros (${esc(dietInfo[1])}):</b> P ${fmt(t.protein)} g · C ${fmt(t.carbs)} g · F ${fmt(t.fat)} g
+        <br/><span style="color:var(--muted);font-size:12px">${esc(dietInfo[2])}</span></div>`;
   }
 
   form.addEventListener('input', () => {
@@ -144,6 +187,7 @@ export function renderProfilePage(root) {
       `Target ${maintain ? '(not needed to maintain)' : form.goal_type.value === 'gain' ? 'gain per week (kg)' : 'loss per week (kg)'}`;
     refreshPreview();
   });
+  qs('#diet-select', root).addEventListener('change', refreshPreview);
   refreshPreview();
 
   form.addEventListener('submit', async (e) => {
@@ -160,6 +204,7 @@ export function renderProfilePage(root) {
         goal_type: f.get('goal_type'),
         weekly_goal_kg: Number(f.get('weekly_goal_kg')) || 0,
         step_goal: Number(f.get('step_goal')),
+        diet_type: qs('#diet-select', root).value,
         today: todayStr(),
       });
       App.profile = data.profile;

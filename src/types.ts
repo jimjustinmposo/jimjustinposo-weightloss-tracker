@@ -27,11 +27,13 @@ export type Gender = 'male' | 'female' | 'other';
 export type ActivityLevel = 'sedentary' | 'light' | 'moderate' | 'active' | 'athlete';
 export type GoalType = 'lose' | 'maintain' | 'gain';
 export type MealType = 'breakfast' | 'lunch' | 'dinner' | 'snack';
+export type DietType = 'normal' | 'lowcarb' | 'keto' | 'carnivore' | 'omad_carnivore';
 
 export const GENDERS: Gender[] = ['male', 'female', 'other'];
 export const ACTIVITY_LEVELS: ActivityLevel[] = ['sedentary', 'light', 'moderate', 'active', 'athlete'];
 export const GOAL_TYPES: GoalType[] = ['lose', 'maintain', 'gain'];
 export const MEALS: MealType[] = ['breakfast', 'lunch', 'dinner', 'snack'];
+export const DIET_TYPES: DietType[] = ['normal', 'lowcarb', 'keto', 'carnivore', 'omad_carnivore'];
 
 export function num(v: unknown, fallback = NaN): number {
   const n = typeof v === 'string' ? Number(v) : (v as number);

@@ -14,6 +14,7 @@ type ProfileRow = {
   current_weight: number | null;
   goal_type: 'lose' | 'maintain' | 'gain';
   weekly_goal_kg: number;
+  diet_type: 'normal' | 'lowcarb' | 'keto' | 'carnivore' | 'omad_carnivore' | null;
 };
 
 const app = new Hono<{ Bindings: Env; Variables: AppVars }>();
@@ -56,7 +57,7 @@ export async function applyWeightLog(
   // Sync current weight into the profile and refresh derived targets.
   const profile =
     (await db.prepare(
-      'SELECT name, age, gender, height_cm, activity_level, start_weight, current_weight, goal_type, weekly_goal_kg FROM profiles WHERE user_id = ?1'
+      'SELECT name, age, gender, height_cm, activity_level, start_weight, current_weight, goal_type, weekly_goal_kg, diet_type FROM profiles WHERE user_id = ?1'
     ).bind(userId).first<ProfileRow>()) ?? null;
 
   if (profile && profile.age != null && profile.height_cm != null) {
@@ -69,6 +70,7 @@ export async function applyWeightLog(
       activityLevel: profile.activity_level ?? 'light',
       goalType: profile.goal_type,
       weeklyGoalKg: profile.weekly_goal_kg,
+      dietType: profile.diet_type ?? 'normal',
     });
     await db.prepare(
       `UPDATE profiles SET current_weight=?2, bmr=?3, tdee=?4, bmi=?5, bmi_category=?6,
