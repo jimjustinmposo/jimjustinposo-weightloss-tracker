@@ -104,28 +104,45 @@ app.put('/', async (c) => {
        carb_target=excluded.carb_target, fat_target=excluded.fat_target,
        updated_at=datetime('now')`);
 
+  const dietArgs = [
+    userId, name, age, gender, heightCm, activityLevel, startWeight, currentWeight,
+    goalType, weeklyGoalKg, stepGoal, dietType,
+    targets.bmr, targets.tdee, targets.bmi, targets.bmi_category,
+    targets.calorie_target, targets.protein_target, targets.carb_target, targets.fat_target,
+  ] as const;
+  const legacyArgs = [
+    userId, name, age, gender, heightCm, activityLevel, startWeight, currentWeight,
+    goalType, weeklyGoalKg, stepGoal,
+    targets.bmr, targets.tdee, targets.bmi, targets.bmi_category,
+    targets.calorie_target, targets.protein_target, targets.carb_target, targets.fat_target,
+  ] as const;
+
+  const saveDiet = () => insertWithDiet.bind(...dietArgs).run();
+  const saveLegacy = () => insertLegacy.bind(...legacyArgs).run();
+
   try {
-    await insertWithDiet
-      .bind(
-        userId, name, age, gender, heightCm, activityLevel, startWeight, currentWeight,
-        goalType, weeklyGoalKg, stepGoal, dietType,
-        targets.bmr, targets.tdee, targets.bmi, targets.bmi_category,
-        targets.calorie_target, targets.protein_target, targets.carb_target, targets.fat_target
-      )
-      .run();
+    await saveDiet();
   } catch (err) {
     const msg = String((err as Error)?.message ?? '');
     if (/diet_type|no such column/i.test(msg)) {
-      /* Remote schema not yet migrated — save anyway (without the diet column)
-         instead of failing the whole profile update with a 500. */
-      await insertLegacy
-        .bind(
-          userId, name, age, gender, heightCm, activityLevel, startWeight, currentWeight,
-          goalType, weeklyGoalKg, stepGoal,
-          targets.bmr, targets.tdee, targets.bmi, targets.bmi_category,
-          targets.calorie_target, targets.protein_target, targets.carb_target, targets.fat_target
-        )
-        .run();
+      /* Database predates migration 0003 (missing diet_type column).
+         Self-heal: add the column, then retry — the chosen diet now persists
+         everywhere without needing a manual migration step. */
+      try {
+        await c.env.DB
+          .prepare("ALTER TABLE profiles ADD COLUMN diet_type TEXT NOT NULL DEFAULT 'normal'")
+          .run();
+        await saveDiet();
+      } catch (healErr) {
+        const healMsg = String((healErr as Error)?.message ?? '');
+        if (/duplicate column name/i.test(healMsg)) {
+          // Another request added the column mid-flight — plain retry succeeds.
+          await saveDiet();
+        } else {
+          // Last resort: save without the diet column (old behaviour).
+          await saveLegacy();
+        }
+      }
     } else {
       throw new HTTPException(500, { message: 'Could not save your profile. Please try again.' });
     }
