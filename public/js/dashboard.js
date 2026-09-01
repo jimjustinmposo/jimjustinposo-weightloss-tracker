@@ -239,7 +239,7 @@ export async function renderDashboard(root) {
         <h3>${icons.flame} Calories</h3>
         ${ring({
           pct: calRingPct, size: 132, color: calRingPct > 105 ? 'var(--danger)' : 'var(--primary)',
-          big: fmt(Math.max(calorieTarget - Number(d.net_calories), 0)),
+          big: fmt(calorieTarget - Number(d.net_calories)),
           sub: `of ${fmt(calorieTarget)} left`,
         })}
         <p style="font-size:12px;color:var(--muted);margin-top:8px">
