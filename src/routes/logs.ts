@@ -200,6 +200,47 @@ app.post('/', async (c) => {
   return c.json({ entry }, 201);
 });
 
+app.put('/:id', async (c) => {
+  const userId = c.get('userId');
+  const id = Number(c.req.param('id'));
+  const body = (await c.req.json().catch(() => ({}))) as Record<string, unknown>;
+
+  // Verify the entry exists and belongs to the user
+  const existing = await c.env.DB.prepare('SELECT * FROM food_logs WHERE id = ?1 AND user_id = ?2')
+    .bind(id, userId)
+    .first<LogRow>();
+  if (!existing) throw new HTTPException(404, { message: 'Entry not found.' });
+
+  const meal = String(body.meal ?? existing.meal) as MealType;
+  if (!MEALS.includes(meal)) throw new HTTPException(400, { message: 'Invalid meal.' });
+  const grams = num(body.grams ?? existing.grams);
+  if (!Number.isFinite(grams) || grams <= 0 || grams > 5000) {
+    throw new HTTPException(400, { message: 'Amount must be between 0 and 5,000 grams.' });
+  }
+
+  const name = String(body.name ?? existing.name ?? '').trim().slice(0, 120);
+  if (!name) throw new HTTPException(400, { message: 'Food name is required.' });
+  const calories = num(body.calories ?? existing.calories, NaN);
+  const protein = num(body.protein ?? existing.protein, NaN);
+  const carbs = num(body.carbs ?? existing.carbs, NaN);
+  const fat = num(body.fat ?? existing.fat, NaN);
+  if (![calories, protein, carbs, fat].every((v) => Number.isFinite(v) && v >= 0)) {
+    throw new HTTPException(400, { message: 'Calories, protein, carbs and fat must be non-negative numbers.' });
+  }
+
+  await c.env.DB.prepare(
+    `UPDATE food_logs SET name = ?1, meal = ?2, grams = ?3, calories = ?4, protein = ?5, carbs = ?6, fat = ?7
+     WHERE id = ?8 AND user_id = ?9`
+  )
+    .bind(name, meal, grams, round2(calories), round2(protein), round2(carbs), round2(fat), id, userId)
+    .run();
+
+  const updated = await c.env.DB.prepare('SELECT * FROM food_logs WHERE id = ?1')
+    .bind(id)
+    .first<LogRow>();
+  return c.json({ entry: updated });
+});
+
 app.delete('/:id', async (c) => {
   const userId = c.get('userId');
   const id = Number(c.req.param('id'));

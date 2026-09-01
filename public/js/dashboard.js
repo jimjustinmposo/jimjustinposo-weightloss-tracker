@@ -119,6 +119,59 @@ export function stepsModal(onSaved, entry = null) {
     }
   });
 }
+export function editLogModal(entry, onSaved) {
+  const mealOptions = ['breakfast', 'lunch', 'dinner', 'snack']
+    .map((m) => `<option value="${m}" ${m === entry.meal ? 'selected' : ''}>${m[0].toUpperCase() + m.slice(1)}</option>`)
+    .join('');
+  const { overlay, close } = openModal({
+    title: `Edit "${entry.name}"`,
+    body: `
+      <form id="el-form">
+        <div class="field"><label>Food name</label>
+          <input name="name" value="${esc(entry.name)}" required /></div>
+        <div class="form-row">
+          <div class="field"><label>Meal</label>
+            <select name="meal">${mealOptions}</select></div>
+          <div class="field"><label>Amount (g)</label>
+            <input name="grams" type="number" step="1" min="1" max="5000" value="${Number(entry.grams)}" required /></div>
+        </div>
+        <div class="form-row">
+          <div class="field"><label>Calories</label>
+            <input name="calories" type="number" step="0.1" min="0" value="${Number(entry.calories)}" required /></div>
+          <div class="field"><label>Protein (g)</label>
+            <input name="protein" type="number" step="0.1" min="0" value="${Number(entry.protein)}" /></div>
+        </div>
+        <div class="form-row">
+          <div class="field"><label>Carbs (g)</label>
+            <input name="carbs" type="number" step="0.1" min="0" value="${Number(entry.carbs)}" /></div>
+          <div class="field"><label>Fat (g)</label>
+            <input name="fat" type="number" step="0.1" min="0" value="${Number(entry.fat)}" /></div>
+        </div>
+        <button class="btn block accent" type="submit">${icons.pencil} Update Entry</button>
+      </form>`,
+  });
+  qs('#el-form', overlay).addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const f = e.target;
+    try {
+      await api.put(`/api/logs/${entry.id}`, {
+        name: f.name.value.trim(),
+        meal: f.meal.value,
+        grams: Number(f.grams.value),
+        calories: Number(f.calories.value),
+        protein: Number(f.protein.value || 0),
+        carbs: Number(f.carbs.value || 0),
+        fat: Number(f.fat.value || 0),
+      });
+      close();
+      toast('Entry updated');
+      onSaved?.();
+    } catch (err) {
+      toast(err.message, 'error');
+    }
+  });
+}
+
 function mealGroupHtml(meal, entries) {
   const kcal = entries.reduce((s, e) => s + Number(e.calories || 0), 0);
   const rows = entries.map((e) => `
@@ -130,6 +183,7 @@ function mealGroupHtml(meal, entries) {
         </div>
       </div>
       <span class="kcal">${fmt(Number(e.calories))} kcal</span>
+      <button class="icon-btn edit-log" data-id="${e.id}" title="Edit entry">${icons.pencil}</button>
       <button class="icon-btn del-log" data-id="${e.id}" title="Delete entry">${icons.trash}</button>
     </div>`).join('');
   return `
@@ -295,6 +349,15 @@ export async function renderDashboard(root) {
       } catch (err) {
         toast(err.message, 'error');
       }
+    })
+  );
+
+  // Flatten all meal entries so we can look up by id for editing
+  const allEntries = ['breakfast', 'lunch', 'dinner', 'snack'].flatMap((m) => d.meals?.[m] || []);
+  qsa('.edit-log', root).forEach((btn) =>
+    btn.addEventListener('click', () => {
+      const entry = allEntries.find((e) => String(e.id) === btn.dataset.id);
+      if (entry) editLogModal(entry, () => renderDashboard(root));
     })
   );
 }
