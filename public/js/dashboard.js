@@ -123,6 +123,19 @@ export function editLogModal(entry, onSaved) {
   const mealOptions = ['breakfast', 'lunch', 'dinner', 'snack']
     .map((m) => `<option value="${m}" ${m === entry.meal ? 'selected' : ''}>${m[0].toUpperCase() + m.slice(1)}</option>`)
     .join('');
+
+  /* Derive per-100g nutrition from the stored entry so macros auto-scale
+     whenever the user edits the grams. This mirrors the backend scaleFood()
+     math: stored_value = per_100g * grams / 100  →  per_100g = stored * 100 / grams */
+  const baseGrams = Number(entry.grams) || 1;
+  const per100 = {
+    calories: (Number(entry.calories) || 0) * 100 / baseGrams,
+    protein: (Number(entry.protein) || 0) * 100 / baseGrams,
+    carbs: (Number(entry.carbs) || 0) * 100 / baseGrams,
+    fat: (Number(entry.fat) || 0) * 100 / baseGrams,
+  };
+  const round2 = (v) => Math.round(v * 100) / 100;
+
   const { overlay, close } = openModal({
     title: `Edit "${entry.name}"`,
     body: `
@@ -135,21 +148,39 @@ export function editLogModal(entry, onSaved) {
           <div class="field"><label>Amount (g)</label>
             <input name="grams" type="number" step="1" min="1" max="5000" value="${Number(entry.grams)}" required /></div>
         </div>
+        <p class="form-hint">Macros are calculated automatically from the amount (g) above.</p>
         <div class="form-row">
           <div class="field"><label>Calories</label>
-            <input name="calories" type="number" step="0.1" min="0" value="${Number(entry.calories)}" required /></div>
+            <input name="calories" type="number" step="0.1" min="0" value="${Number(entry.calories)}" readonly /></div>
           <div class="field"><label>Protein (g)</label>
-            <input name="protein" type="number" step="0.1" min="0" value="${Number(entry.protein)}" /></div>
+            <input name="protein" type="number" step="0.1" min="0" value="${Number(entry.protein)}" readonly /></div>
         </div>
         <div class="form-row">
           <div class="field"><label>Carbs (g)</label>
-            <input name="carbs" type="number" step="0.1" min="0" value="${Number(entry.carbs)}" /></div>
+            <input name="carbs" type="number" step="0.1" min="0" value="${Number(entry.carbs)}" readonly /></div>
           <div class="field"><label>Fat (g)</label>
-            <input name="fat" type="number" step="0.1" min="0" value="${Number(entry.fat)}" /></div>
+            <input name="fat" type="number" step="0.1" min="0" value="${Number(entry.fat)}" readonly /></div>
         </div>
         <button class="btn block accent" type="submit">${icons.pencil} Update Entry</button>
       </form>`,
   });
+
+  // Recalculate macros in real-time whenever the grams value changes.
+  const gramsInput = qs('input[name=grams]', overlay);
+  const calInput = qs('input[name=calories]', overlay);
+  const proInput = qs('input[name=protein]', overlay);
+  const carInput = qs('input[name=carbs]', overlay);
+  const fatInput = qs('input[name=fat]', overlay);
+
+  const recalc = () => {
+    const factor = (Number(gramsInput.value) || 0) / 100;
+    calInput.value = round2(per100.calories * factor);
+    proInput.value = round2(per100.protein * factor);
+    carInput.value = round2(per100.carbs * factor);
+    fatInput.value = round2(per100.fat * factor);
+  };
+  gramsInput.addEventListener('input', recalc);
+
   qs('#el-form', overlay).addEventListener('submit', async (e) => {
     e.preventDefault();
     const f = e.target;
