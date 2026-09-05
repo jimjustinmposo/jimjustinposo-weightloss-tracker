@@ -216,6 +216,30 @@ function parseFoodText(text) {
 /* Round to 2 decimals for values placed into the form. */
 const round2 = (v) => Math.round((Number(v) || 0) * 100) / 100;
 
+/* Downscale a photo File to a JPEG data URL before sending it to the AI —
+   phone camera photos can be several MB; the model only needs enough detail
+   to identify the dish, so this keeps the upload small and fast. */
+function resizeImageToDataUrl(file, maxDim = 1024, quality = 0.82) {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    const url = URL.createObjectURL(file);
+    img.onload = () => {
+      URL.revokeObjectURL(url);
+      const scale = Math.min(1, maxDim / Math.max(img.width, img.height));
+      const w = Math.max(1, Math.round(img.width * scale));
+      const h = Math.max(1, Math.round(img.height * scale));
+      const canvas = document.createElement('canvas');
+      canvas.width = w;
+      canvas.height = h;
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(img, 0, 0, w, h);
+      resolve(canvas.toDataURL('image/jpeg', quality));
+    };
+    img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('Could not load image')); };
+    img.src = url;
+  });
+}
+
 /* ---------- Foods management page ---------- */
 export async function renderFoodsPage(root) {
   root.innerHTML = `
@@ -241,6 +265,22 @@ export async function renderFoodsPage(root) {
             <button type="button" id="fm-parse-clear" class="btn sm ghost">Clear</button>
           </div>
           <div id="fm-parse-note" class="form-hint">Type just a food + amount (e.g. “Sinigang 250 g”) to auto-compute macros from your food database — or paste full nutrition labels. Review, then click “Add to Database”.</div>
+        </div>
+        <div class="photo-box">
+          <label for="fm-photo-input">Or identify from a photo:</label>
+          <div class="photo-row">
+            <input type="file" id="fm-photo-input" accept="image/*" capture="environment" />
+            <img id="fm-photo-preview" class="photo-preview" alt="" />
+          </div>
+          <div class="photo-row">
+            <input type="text" id="fm-photo-name" placeholder="Food name (optional, e.g. Sinigang na Baboy)" />
+            <input type="number" id="fm-photo-grams" placeholder="Grams e.g. 300" min="1" max="5000" step="1" />
+          </div>
+          <div class="photo-actions">
+            <button type="button" id="fm-photo-btn" class="btn sm">${icons.camera} Identify with Gemini</button>
+            <button type="button" id="fm-photo-clear" class="btn sm ghost">Clear</button>
+          </div>
+          <div id="fm-photo-note" class="form-hint">Take or choose a photo, optionally add the food name and grams, then tap “Identify with Gemini” to fill the fields below.</div>
         </div>
         <hr class="paste-sep" />
         <form id="fm-add">
@@ -371,6 +411,79 @@ export async function renderFoodsPage(root) {
     parseNote.textContent = '';
     addForm.reset();
     parseInput.focus();
+  });
+
+  // ---- Photo-to-fill: snap/choose a photo, identify the food with Gemini ----
+  const photoInput = qs('#fm-photo-input', root);
+  const photoPreview = qs('#fm-photo-preview', root);
+  const photoNameInput = qs('#fm-photo-name', root);
+  const photoGramsInput = qs('#fm-photo-grams', root);
+  const photoBtn = qs('#fm-photo-btn', root);
+  const photoBtnOriginal = photoBtn.innerHTML;
+  const photoNote = qs('#fm-photo-note', root);
+  let photoDataUrl = null;
+
+  const setPhotoBusy = (busy) => {
+    photoBtn.disabled = busy;
+    photoBtn.innerHTML = busy ? 'Identifying…' : photoBtnOriginal;
+  };
+
+  photoInput.addEventListener('change', async () => {
+    const file = photoInput.files?.[0];
+    if (!file) return;
+    try {
+      photoDataUrl = await resizeImageToDataUrl(file);
+      photoPreview.src = photoDataUrl;
+      photoPreview.classList.add('show');
+      photoNote.textContent = 'Photo ready — add a name/grams if you like, then tap “Identify with Gemini”.';
+    } catch {
+      photoDataUrl = null;
+      toast('Could not read that photo — try another one.', 'error');
+    }
+  });
+
+  photoBtn.addEventListener('click', async () => {
+    if (!photoDataUrl) {
+      toast('Choose or take a photo first.', 'error');
+      return;
+    }
+    const name = photoNameInput.value.trim();
+    const gramsTyped = Number(photoGramsInput.value);
+    const grams = Number.isFinite(gramsTyped) && gramsTyped > 0 ? gramsTyped : 100;
+    const e = addForm.elements;
+
+    setPhotoBusy(true);
+    try {
+      const { estimate } = await api.post('/api/nutrition/estimate', { name, grams, image: photoDataUrl });
+      e.name.value = estimate.name || name || 'Identified food';
+      e.serving_grams.value = grams;
+      e.calories.value = estimate.calories;
+      e.protein.value = estimate.protein;
+      e.carbs.value = estimate.carbs;
+      e.fat.value = estimate.fat;
+      photoNote.textContent =
+        `Identified “${estimate.name}” from your photo — macros are an ONLINE ESTIMATE for ${fmt(grams)} g${Number.isFinite(gramsTyped) && gramsTyped > 0 ? '' : ' (default, no grams typed)'}. Review before adding.`;
+      toast(`Identified “${estimate.name}” from photo`);
+    } catch (err) {
+      const reason = err?.message || String(err);
+      let hint = 'Set AI_BASE_URL + AI_MODEL (.dev.vars) to a vision-capable model (e.g. Gemini).';
+      if (err?.status === 503) hint = 'AI not configured — add AI_BASE_URL + AI_MODEL and start your AI server.';
+      else if (err?.status === 502) hint = 'AI request failed — check your AI endpoint/model, and that it supports image input.';
+      photoNote.textContent = `Could not identify the food from the photo (${reason}). ${hint}`;
+      toast(`Photo identification failed — ${hint}`, 'error');
+    } finally {
+      setPhotoBusy(false);
+    }
+  });
+
+  qs('#fm-photo-clear', root).addEventListener('click', () => {
+    photoInput.value = '';
+    photoDataUrl = null;
+    photoPreview.src = '';
+    photoPreview.classList.remove('show');
+    photoNameInput.value = '';
+    photoGramsInput.value = '';
+    photoNote.textContent = 'Take or choose a photo, optionally add the food name and grams, then tap “Identify with Gemini” to fill the fields below.';
   });
 
   async function load() {

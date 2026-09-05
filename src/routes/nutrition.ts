@@ -8,17 +8,28 @@ import { maxOfRange, round2 } from '../telegram/textparse';
 const app = new Hono<{ Bindings: Env; Variables: AppVars }>();
 
 /**
- * POST /api/nutrition/estimate  { name, grams }
+ * POST /api/nutrition/estimate  { name, grams, image? }
  * Estimates macros for a food + amount using the configured AI model
  * (OpenAI-compatible). When the model reports a value as a range, the MAXIMUM
  * is always used (e.g. protein 10–13 g → 13 g). Encrypted/secret keys never
  * leave the backend — the browser just receives the numeric estimate.
+ *
+ * `image` is optional: a data URL (e.g. "data:image/jpeg;base64,...") of a
+ * food photo. When present, the configured model is asked to identify the
+ * food from the photo (a vision-capable model + endpoint is required, e.g.
+ * Google's Gemini OpenAI-compatible endpoint). `name` becomes an optional
+ * hint in that case instead of a required field.
  */
 app.post('/estimate', async (c) => {
   const body = (await c.req.json().catch(() => ({}))) as Record<string, unknown>;
   const name = String(body.name ?? '').trim().slice(0, 120);
   const grams = num(body.grams, NaN);
-  if (!name) throw new HTTPException(400, { message: 'Food name is required.' });
+  const image = typeof body.image === 'string' ? body.image.trim() : '';
+
+  if (!name && !image) throw new HTTPException(400, { message: 'Food name (or a photo) is required.' });
+  if (image && !/^data:image\/[a-z0-9.+-]+;base64,/i.test(image)) {
+    throw new HTTPException(400, { message: 'Photo must be a base64 image data URL.' });
+  }
   if (!Number.isFinite(grams) || grams <= 0 || grams > 5000) {
     throw new HTTPException(400, { message: 'Amount must be between 0 and 5,000 grams.' });
   }
@@ -30,13 +41,29 @@ app.post('/estimate', async (c) => {
     });
   }
 
-  const SYSTEM_PROMPT = `You are a nutrition database. Given a food and an amount in grams, return ONLY a JSON object with this exact shape (no prose, no markdown fences):
+  const SYSTEM_PROMPT = image
+    ? `You are a nutrition database with vision. You are given a photo of a food/meal, its amount in grams, and optionally a name hint. Identify the food and return ONLY a JSON object with this exact shape (no prose, no markdown fences):
+{"name":"food name","calories":0,"protein":0,"carbs":0,"fat":0}
+Rules:
+- Look at the photo to identify the specific dish/food (use the name hint if given and it matches what you see; otherwise name it yourself).
+- Estimate the nutrition for EXACTLY the given grams of that food, regardless of the portion size shown in the photo.
+- If the true value is commonly reported as a range (e.g. protein 10-13g per 100g), ALWAYS return the MAXIMUM value (13).
+- Values must be numbers (no units, no ranges, no strings).
+- Use typical values (e.g. from USDA) for the identified dish.`
+    : `You are a nutrition database. Given a food and an amount in grams, return ONLY a JSON object with this exact shape (no prose, no markdown fences):
 {"name":"food name","calories":0,"protein":0,"carbs":0,"fat":0}
 Rules:
 - Estimate the nutrition for EXACTLY the given grams of that food.
 - If the true value is commonly reported as a range (e.g. protein 10-13g per 100g), ALWAYS return the MAXIMUM value (13).
 - Values must be numbers (no units, no ranges, no strings).
 - Use typical values (e.g. from USDA). For "100g chicken barbeque", return the macros of 100g of that dish.`;
+
+  const userContent = image
+    ? [
+        { type: 'text', text: `${name ? `Name hint: ${name}. ` : ''}Identify the food in this photo and estimate nutrition for ${grams} g of it.` },
+        { type: 'image_url', image_url: { url: image } },
+      ]
+    : `${name} — ${grams} g`;
 
   let res: Response;
   try {
@@ -51,10 +78,10 @@ Rules:
         temperature: 0,
         messages: [
           { role: 'system', content: SYSTEM_PROMPT },
-          { role: 'user', content: `${name} — ${grams} g` },
+          { role: 'user', content: userContent },
         ],
       }),
-      signal: AbortSignal.timeout(20_000),
+      signal: AbortSignal.timeout(image ? 45_000 : 20_000),
     });
   } catch (e) {
     throw new HTTPException(502, { message: `Online nutrition lookup failed: ${(e as Error).message}` });
@@ -87,7 +114,7 @@ Rules:
 
   return c.json({
     estimate: {
-      name: String(o.name ?? name).slice(0, 120),
+      name: String(o.name || name || 'Identified food').slice(0, 120),
       grams,
       calories: pick('calories'),
       protein: pick('protein'),

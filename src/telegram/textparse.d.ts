@@ -2,6 +2,7 @@ import type { MealType } from '../types';
 
 export declare const MEAL_LABELS: Record<MealType, string>;
 export declare function round2(v: number): number;
+export declare function maxOfRange(v: unknown): number;
 export declare function normalizeUnit(unit: unknown): string | null;
 export declare const GRAMS_PER_OZ: number;
 export declare const GRAMS_PER_LB: number;
