@@ -248,7 +248,7 @@ export async function renderFoodsPage(root) {
         <p>Your personal food catalog — search it every time you log a meal, add new foods anytime.</p></div>
       <button class="btn" id="foods-log">${icons.plus} Log Food</button>
     </div>
-    <section class="grid grid-auto">
+    <section class="grid grid-auto foods-layout">
       <div class="card">
         <h3>${icons.search} My Foods</h3>
         <div class="searchbox">${icons.search}
