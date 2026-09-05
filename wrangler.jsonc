@@ -1,6 +1,7 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "justin-weightloss-tracker",
+  "account_id": "2e8225f2aafd87dd7a864e29be04624c",
   "main": "src/index.ts",
   "compatibility_date": "2025-05-05",
   "assets": {
