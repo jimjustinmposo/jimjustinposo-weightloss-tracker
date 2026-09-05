@@ -119,6 +119,53 @@ export function stepsModal(onSaved, entry = null) {
     }
   });
 }
+/* ---------- Amount math for the Edit-Food modal ---------- */
+/* Lets users type a plain number ("100"), a relative adjustment ("+50",
+   "-20", "*2", "/3") or a full expression ("100+100") into the Amount field.
+   An expression that starts with an operator is applied to the CURRENT
+   amount, so "+100" on a 100 g entry becomes 200 g. */
+function calcGrams(raw, base = 0) {
+  if (raw == null) return null;
+  let s = String(raw).replace(/[,\s]/g, '').replace(/×/g, '*').replace(/[−–]/g, '-');
+  if (!s) return null;
+
+  // Plain positive number → absolute amount (e.g. "150").
+  if (/^\d+(\.\d+)?$/.test(s)) {
+    const v = Number(s);
+    return Number.isFinite(v) ? v : null;
+  }
+
+  // Leading operator → apply it to the current amount, so "+100" adds,
+  // "-20" subtracts and "*2" / "/3" multiply / divide the current value.
+  if (/^[+\-*/]/.test(s) && !/[+\-*/]{2}/.test(s)) s = String(base) + s;
+
+  if (!/^-?\d+(\.\d+)?([+\-*/]\d+(\.\d+)?)*$/.test(s)) return null;
+
+  const nums = s.split(/[+\-*/]/).map(Number);
+  const ops = (s.match(/[+\-*/]/g) || []);
+  if (nums.length !== ops.length + 1 || nums.some((n) => !Number.isFinite(n))) return null;
+
+  // Two-pass math: * and / bind tighter than + and -.
+  const vals = [nums[0]];
+  const stack = [];
+  const prec = (o) => (o === '*' || o === '/') ? 2 : 1;
+  const collapse = () => {
+    const b = vals.pop(), a = vals.pop(), op = stack.pop();
+    if (op === '*') vals.push(a * b);
+    else if (op === '/') vals.push(b === 0 ? NaN : a / b);
+    else if (op === '+') vals.push(a + b);
+    else vals.push(a - b);
+  };
+  for (let i = 0; i < ops.length; i++) {
+    while (stack.length && prec(stack[stack.length - 1]) >= prec(ops[i])) collapse();
+    vals.push(nums[i + 1]);
+    stack.push(ops[i]);
+  }
+  while (stack.length) collapse();
+  const result = vals[0];
+  return Number.isFinite(result) ? result : null;
+}
+
 export function editLogModal(entry, onSaved) {
   const mealOptions = ['breakfast', 'lunch', 'dinner', 'snack']
     .map((m) => `<option value="${m}" ${m === entry.meal ? 'selected' : ''}>${m[0].toUpperCase() + m.slice(1)}</option>`)
@@ -146,9 +193,11 @@ export function editLogModal(entry, onSaved) {
           <div class="field"><label>Meal</label>
             <select name="meal">${mealOptions}</select></div>
           <div class="field"><label>Amount (g)</label>
-            <input name="grams" type="number" step="1" min="1" max="5000" value="${Number(entry.grams)}" required /></div>
+            <input name="grams" type="text" inputmode="decimal" autocomplete="off" spellcheck="false"
+              value="${Number(entry.grams)}" required /></div>
         </div>
-        <p class="form-hint">Macros are calculated automatically from the amount (g) above.</p>
+        <p class="form-hint">Macros are calculated automatically from the amount (g) above.
+          Tip: type <b>+50</b>, <b>-20</b> or <b>*2</b> to adjust the current amount.</p>
         <div class="form-row">
           <div class="field"><label>Calories</label>
             <input name="calories" type="number" step="0.1" min="0" value="${Number(entry.calories)}" readonly /></div>
@@ -172,23 +221,40 @@ export function editLogModal(entry, onSaved) {
   const carInput = qs('input[name=carbs]', overlay);
   const fatInput = qs('input[name=fat]', overlay);
 
+  // Accept plain numbers ("100") AND relative adjustments ("+50", "-20",
+  // "*2", "/3") in the Amount field — "+100" on a 100 g entry adds 100 g.
   const recalc = () => {
-    const factor = (Number(gramsInput.value) || 0) / 100;
+    const grams = calcGrams(gramsInput.value, baseGrams);
+    if (grams == null || grams <= 0) return;
+    const factor = grams / 100;
     calInput.value = round2(per100.calories * factor);
     proInput.value = round2(per100.protein * factor);
     carInput.value = round2(per100.carbs * factor);
     fatInput.value = round2(per100.fat * factor);
   };
   gramsInput.addEventListener('input', recalc);
+  // On blur / Enter within the field, collapse the expression to a plain number.
+  gramsInput.addEventListener('change', () => {
+    const grams = calcGrams(gramsInput.value, baseGrams);
+    if (grams != null && grams > 0) {
+      gramsInput.value = round2(grams);
+      recalc();
+    }
+  });
 
   qs('#el-form', overlay).addEventListener('submit', async (e) => {
     e.preventDefault();
     const f = e.target;
+    const grams = calcGrams(f.grams.value, baseGrams);
+    if (grams == null || !(grams > 0) || grams > 5000) {
+      toast('Invalid amount — use a plain number (e.g. 150) or an adjustment (e.g. +50, -20, *2, /2).', 'error');
+      return;
+    }
     try {
       await api.put(`/api/logs/${entry.id}`, {
         name: f.name.value.trim(),
         meal: f.meal.value,
-        grams: Number(f.grams.value),
+        grams: round2(grams),
         calories: Number(f.calories.value),
         protein: Number(f.protein.value || 0),
         carbs: Number(f.carbs.value || 0),

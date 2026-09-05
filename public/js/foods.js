@@ -136,6 +136,57 @@ function wireAddForm(form, food, onDone) {
     }
   });
 }
+/* ---------- "Paste food details" auto-fill for the Add New Food form ---------- */
+/* Accepts copy-pasted nutrition info in common formats, e.g.
+     Sinigang
+     Calories: 95 kcal
+     Protein: 10 g
+     Carbs: 7 g
+     Fat: 3 g
+   Labels are matched case-insensitively anywhere in the text; the number that
+   follows each label is placed into the matching form field below. */
+function parseFoodText(text) {
+  const src = String(text || '');
+  const lines = src.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+  if (!lines.length) return null;
+
+  // First number that follows a label, e.g. "Protein: 10 g" → 10.
+  const grab = (aliases) => {
+    const re = new RegExp(`\\b(?:${aliases.join('|')})\\b[^\\d\\r\\n]{0,40}(\\d+(?:\\.\\d+)?)`, 'i');
+    const m = src.match(re);
+    return m ? Number(m[1]) : null;
+  };
+
+  // Food name: an explicit "Name: ..." line, else the first line that isn't a
+  // nutrition label (e.g. "Sinigang").
+  let name = null;
+  const namedLine = lines.find((l) => /^name\s*[:=\-–]\s*/i.test(l));
+  if (namedLine) name = namedLine.replace(/^name\s*[:=\-–]\s*/i, '').trim();
+  if (!name) {
+    const skipRe = /\b(calories?|kcal|protein|carbs?|carbohydrates?|fat|energy|servings?|per\s*\d+\s*g)\b/i;
+    const candidate = lines.find((l) => !skipRe.test(l));
+    if (candidate) name = candidate.replace(/^[-•*>\d.]+\s*/, '');
+  }
+  if (!name) name = lines[0];
+  name = String(name).replace(/[:;*\s]+$/, '').trim().slice(0, 120);
+
+  // Calories may appear as "Calories: 95 kcal" or just "95 kcal".
+  const kcalLabel = src.match(/\b(?:calories?|energy)\b[^\d\n]{0,40}(\d+(?:\.\d+)?)/i);
+  const kcalUnit = src.match(/\b(\d+(?:\.\d+)?)\s*kcal\b/i);
+
+  // Optional serving size, e.g. "Serving: 250 g" → 250.
+  const serving = src.match(/\bservings?\b[^\d\n]{0,30}?(\d+(?:\.\d+)?)\s*(?:g|grams?)\b/i);
+
+  return {
+    name,
+    serving_grams: serving ? Number(serving[1]) : null,
+    calories: kcalLabel ? Number(kcalLabel[1]) : (kcalUnit ? Number(kcalUnit[1]) : null),
+    protein: grab(['protein']),
+    carbs: grab(['carbs?', 'carbohydrates?']),
+    fat: grab(['fat']),
+  };
+}
+
 /* ---------- Foods management page ---------- */
 export async function renderFoodsPage(root) {
   root.innerHTML = `
@@ -153,6 +204,16 @@ export async function renderFoodsPage(root) {
       </div>
       <div class="card">
         <h3>${icons.plus} Add New Food</h3>
+        <div class="paste-box">
+          <label for="fm-parse-input">Paste food details to auto-fill the form below:</label>
+          <textarea id="fm-parse-input" rows="5" spellcheck="false" placeholder="Sinigang&#10;Calories: 95 kcal&#10;Protein: 10 g&#10;Carbs: 7 g&#10;Fat: 3 g"></textarea>
+          <div class="paste-actions">
+            <button type="button" id="fm-parse-btn" class="btn sm">${icons.search} Fill form from text</button>
+            <button type="button" id="fm-parse-clear" class="btn sm ghost">Clear</button>
+          </div>
+          <div id="fm-parse-note" class="form-hint">Detected fields are filled in below — review, then click “Add to Database”.</div>
+        </div>
+        <hr class="paste-sep" />
         <form id="fm-add">
           <div class="field"><label>Food name</label>
             <input name="name" placeholder="e.g. Chicken breast raw" required /></div>
@@ -178,6 +239,38 @@ export async function renderFoodsPage(root) {
 
   const listEl = qs('#fm-list', root);
   const qInput = qs('#fm-q', root);
+  const addForm = qs('#fm-add', root);
+  const parseInput = qs('#fm-parse-input', root);
+  const parseNote = qs('#fm-parse-note', root);
+
+  // ---- Paste-to-fill: turn pasted nutrition text into the form fields ----
+  qs('#fm-parse-btn', root).addEventListener('click', () => {
+    const p = parseFoodText(parseInput.value);
+    if (!p || (!p.name && p.calories == null && p.protein == null && p.carbs == null && p.fat == null)) {
+      parseNote.textContent = '';
+      toast('Could not detect any food details — check the pasted text and try again.', 'error');
+      return;
+    }
+    const e = addForm.elements;
+    if (p.name) e.name.value = p.name;
+    if (p.serving_grams) e.serving_grams.value = p.serving_grams;
+    if (p.calories != null) e.calories.value = p.calories;
+    if (p.protein != null) e.protein.value = p.protein;
+    if (p.carbs != null) e.carbs.value = p.carbs;
+    if (p.fat != null) e.fat.value = p.fat;
+
+    const labels = { name: 'Name', calories: 'Calories', protein: 'Protein', carbs: 'Carbs', fat: 'Fat' };
+    const got = Object.keys(labels).filter((k) => (k === 'name' ? p.name : p[k] != null));
+    parseNote.textContent = `Filled ${got.map((k) => labels[k]).join(', ') || 'no fields'} — review, then click “Add to Database”.`;
+    toast(`Form filled from text — ${got.length}/5 fields detected`);
+  });
+
+  qs('#fm-parse-clear', root).addEventListener('click', () => {
+    parseInput.value = '';
+    parseNote.textContent = '';
+    addForm.reset();
+    parseInput.focus();
+  });
 
   async function load() {
     const q = qInput.value.trim();
@@ -237,6 +330,8 @@ export async function renderFoodsPage(root) {
       });
       toast('Food added');
       f.reset();
+      parseInput.value = '';
+      parseNote.textContent = '';
       load();
     } catch (err) {
       toast(err.message, 'error');
