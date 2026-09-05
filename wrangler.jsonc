@@ -13,7 +13,7 @@
     {
       "binding": "DB",
       "database_name": "weightloss-db",
-      "database_id": "2887d620-21dd-492a-a0e5-0fc0826ac6a7",
+      "database_id": "37bb8278-60f2-4307-a7e2-5dbfd28c415c",
       "migrations_dir": "migrations"
     }
   ],
