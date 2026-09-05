@@ -1,4 +1,5 @@
 import type { Env } from '../types';
+import { extractTextFromAiResult, WORKERS_AI_MODEL, workersAi } from '../ai';
 
 /**
  * Minimal OpenAI-compatible chat-completions client (works with LM Studio,
@@ -33,38 +34,56 @@ function stripFences(s: string): string {
 
 /** Call the configured AI provider. Throws AiUnavailableError if not configured/unreachable/bad output. */
 export async function extractFoods(env: Env, userText: string): Promise<{ items: AiItem[]; meal: string | null }> {
+  const wa = workersAi(env);
   const base = (env.AI_BASE_URL || '').replace(/\/+$/, '');
-  if (!base || !env.AI_MODEL) throw new AiUnavailableError('AI is not configured.');
+  if (!wa && (!base || !env.AI_MODEL)) throw new AiUnavailableError('AI is not configured.');
 
-  let res: Response;
-  try {
-    res = await fetch(`${base}/chat/completions`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        ...(env.AI_API_KEY ? { Authorization: `Bearer ${env.AI_API_KEY}` } : {}),
-      },
-      body: JSON.stringify({
-        model: env.AI_MODEL,
-        temperature: 0,
+  let content = '';
+  if (wa) {
+    // Workers AI binding — runs inside Cloudflare: no external API key, no geo restrictions.
+    let out: unknown;
+    try {
+      out = await wa.run(WORKERS_AI_MODEL, {
         messages: [
           { role: 'system', content: SYSTEM_PROMPT },
           { role: 'user', content: userText },
         ],
-      }),
-      signal: AbortSignal.timeout(20_000),
-    });
-  } catch (e) {
-    throw new AiUnavailableError(`AI request failed: ${(e as Error).message}`);
-  }
-  if (!res.ok) throw new AiUnavailableError(`AI returned HTTP ${res.status}`);
+        max_tokens: 512,
+      });
+    } catch (e) {
+      throw new AiUnavailableError(`AI request failed: ${(e as Error).message}`);
+    }
+    content = extractTextFromAiResult(out);
+  } else {
+    let res: Response;
+    try {
+      res = await fetch(`${base}/chat/completions`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(env.AI_API_KEY ? { Authorization: `Bearer ${env.AI_API_KEY}` } : {}),
+        },
+        body: JSON.stringify({
+          model: env.AI_MODEL,
+          temperature: 0,
+          messages: [
+            { role: 'system', content: SYSTEM_PROMPT },
+            { role: 'user', content: userText },
+          ],
+        }),
+        signal: AbortSignal.timeout(20_000),
+      });
+    } catch (e) {
+      throw new AiUnavailableError(`AI request failed: ${(e as Error).message}`);
+    }
+    if (!res.ok) throw new AiUnavailableError(`AI returned HTTP ${res.status}`);
 
-  let content = '';
-  try {
-    const data = (await res.json()) as { choices?: Array<{ message?: { content?: string } }> };
-    content = String(data?.choices?.[0]?.message?.content ?? '');
-  } catch {
-    throw new AiUnavailableError('AI returned an unreadable response.');
+    try {
+      const data = (await res.json()) as { choices?: Array<{ message?: { content?: string } }> };
+      content = String(data?.choices?.[0]?.message?.content ?? '');
+    } catch {
+      throw new AiUnavailableError('AI returned an unreadable response.');
+    }
   }
 
   let parsed: unknown;

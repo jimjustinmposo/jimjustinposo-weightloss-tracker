@@ -12,6 +12,8 @@ export type Env = {
   AI_BASE_URL?: string;
   AI_API_KEY?: string;
   AI_MODEL?: string;
+  /** Workers AI binding — preferred when present (no external API key, no geo restrictions). */
+  AI?: Ai;
   /** Hours offset from UTC used to compute "today" for Telegram commands (default 0). */
   TELEGRAM_TZ_OFFSET_HOURS?: string;
 };

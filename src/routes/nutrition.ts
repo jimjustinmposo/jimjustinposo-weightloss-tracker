@@ -4,6 +4,7 @@ import type { AppVars, Env } from '../types';
 import { num } from '../types';
 import { AiUnavailableError } from '../telegram/ai';
 import { maxOfRange, round2 } from '../telegram/textparse';
+import { extractTextFromAiResult, WORKERS_AI_MODEL, workersAi } from '../ai';
 
 const app = new Hono<{ Bindings: Env; Variables: AppVars }>();
 
@@ -34,10 +35,11 @@ app.post('/estimate', async (c) => {
     throw new HTTPException(400, { message: 'Amount must be between 0 and 5,000 grams.' });
   }
 
+  const wa = workersAi(c.env);
   const base = (c.env.AI_BASE_URL || '').replace(/\/+$/, '');
-  if (!base || !c.env.AI_MODEL) {
+  if (!wa && (!base || !c.env.AI_MODEL)) {
     throw new HTTPException(503, {
-      message: 'Online nutrition lookup is not configured — add AI_BASE_URL and AI_MODEL (see .dev.vars).',
+      message: 'Online nutrition lookup is not configured — add AI_BASE_URL and AI_MODEL (see .dev.vars), or enable the Workers AI binding in wrangler.jsonc.',
     });
   }
 
@@ -58,42 +60,73 @@ Rules:
 - Values must be numbers (no units, no ranges, no strings).
 - Use typical values (e.g. from USDA). For "100g chicken barbeque", return the macros of 100g of that dish.`;
 
-  const userContent = image
-    ? [
-        { type: 'text', text: `${name ? `Name hint: ${name}. ` : ''}Identify the food in this photo and estimate nutrition for ${grams} g of it.` },
-        { type: 'image_url', image_url: { url: image } },
-      ]
+  const userText = image
+    ? `${name ? `Name hint: ${name}. ` : ''}Identify the food in this photo and estimate nutrition for ${grams} g of it.`
     : `${name} — ${grams} g`;
 
-  let res: Response;
-  try {
-    res = await fetch(`${base}/chat/completions`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        ...(c.env.AI_API_KEY ? { Authorization: `Bearer ${c.env.AI_API_KEY}` } : {}),
-      },
-      body: JSON.stringify({
-        model: c.env.AI_MODEL,
-        temperature: 0,
-        messages: [
-          { role: 'system', content: SYSTEM_PROMPT },
-          { role: 'user', content: userContent },
-        ],
-      }),
-      signal: AbortSignal.timeout(image ? 45_000 : 20_000),
-    });
-  } catch (e) {
-    throw new HTTPException(502, { message: `Online nutrition lookup failed: ${(e as Error).message}` });
-  }
-  if (!res.ok) throw new HTTPException(502, { message: `Online nutrition lookup returned HTTP ${res.status}` });
+  const userContent = image
+    ? [
+        { type: 'text', text: userText },
+        { type: 'image_url', image_url: { url: image } },
+      ]
+    : userText;
 
   let content = '';
-  try {
-    const data = (await res.json()) as { choices?: Array<{ message?: { content?: string } }> };
-    content = String(data?.choices?.[0]?.message?.content ?? '');
-  } catch {
-    throw new HTTPException(502, { message: 'Online nutrition lookup returned an unreadable response.' });
+  if (wa) {
+    // Workers AI binding — runs inside Cloudflare: no external API key, no geo
+    // restrictions. Llama 4 Scout is natively multimodal (photo + text paths).
+    const userParts = image
+      ? [
+          { type: 'text', text: userText },
+          { type: 'image_url', image_url: { url: image } },
+        ]
+      : userText;
+    const input = {
+      messages: [
+        { role: 'system', content: SYSTEM_PROMPT },
+        { role: 'user', content: userParts },
+      ],
+      max_tokens: 512,
+    };
+    let out: unknown;
+    try {
+      out = await wa.run(WORKERS_AI_MODEL, input);
+    } catch (e) {
+      throw new HTTPException(502, { message: `Online nutrition lookup failed: ${(e as Error).message}` });
+    }
+    content = extractTextFromAiResult(out);
+  } else {
+    let res: Response;
+    try {
+      res = await fetch(`${base}/chat/completions`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(c.env.AI_API_KEY ? { Authorization: `Bearer ${c.env.AI_API_KEY}` } : {}),
+        },
+        body: JSON.stringify({
+          model: c.env.AI_MODEL,
+          temperature: 0,
+          messages: [
+            { role: 'system', content: SYSTEM_PROMPT },
+            { role: 'user', content: userContent },
+          ],
+        }),
+        signal: AbortSignal.timeout(image ? 45_000 : 20_000),
+      });
+    } catch (e) {
+      throw new HTTPException(502, { message: `Online nutrition lookup failed: ${(e as Error).message}` });
+    }
+    if (!res.ok) {
+      const detail = (await res.text().catch(() => '')).replace(/\s+/g, ' ').slice(0, 300);
+      throw new HTTPException(502, { message: `Online nutrition lookup returned HTTP ${res.status}${detail ? `: ${detail}` : ''}` });
+    }
+    try {
+      const data = (await res.json()) as { choices?: Array<{ message?: { content?: string } }> };
+      content = String(data?.choices?.[0]?.message?.content ?? '');
+    } catch {
+      throw new HTTPException(502, { message: 'Online nutrition lookup returned an unreadable response.' });
+    }
   }
 
   let parsed: unknown;
@@ -102,7 +135,7 @@ Rules:
     parsed = JSON.parse(stripped);
   } catch {
     const m = /\{[\s\S]*\}/.exec(stripped);
-    if (!m) throw new HTTPException(502, { message: 'Online nutrition lookup did not return JSON.' });
+    if (!m) throw new HTTPException(502, { message: `Online nutrition lookup did not return JSON: ${stripped.slice(0, 200) || '(empty response)'}` });
     try { parsed = JSON.parse(m[0]); } catch { throw new HTTPException(502, { message: 'Online nutrition lookup did not return JSON.' }); }
   }
 
