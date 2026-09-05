@@ -5,6 +5,7 @@ import {
   detectPrep,
   extractMealPrefix,
   localExtract,
+  maxOfRange,
   normalizeAiItems,
   normalizeUnit,
 } from '../src/telegram/textparse.js';
@@ -50,6 +51,26 @@ test('convertToGrams rejects bad input', () => {
   assert.equal(convertToGrams(100, 'cups').reason, 'unknown_unit');
   // pieces without a serving size in the catalog → ask for a weight instead
   assert.equal(convertToGrams(2, 'piece', null).reason, 'no_serving_size');
+});
+
+/* ---------- max-of-range ---------- */
+
+test('maxOfRange picks the HIGHEST value from a range', () => {
+  assert.equal(maxOfRange('10-13'), 13);        // protein 10–13 g → 13
+  assert.equal(maxOfRange('10–13 g'), 13);      // en dash, unit attached
+  assert.equal(maxOfRange('0.5-1.5 kg'), 1.5);
+  assert.equal(maxOfRange('100 - 150 kcal'), 150);
+  assert.equal(maxOfRange('180-220'), 220);
+  assert.equal(maxOfRange(12), 12);             // plain number passes through
+  assert.equal(maxOfRange('12'), 12);
+  assert.equal(maxOfRange('1,300'), 1300);      // thousands comma stays one number
+});
+
+test('maxOfRange returns null on garbage', () => {
+  assert.equal(maxOfRange(null), null);
+  assert.equal(maxOfRange(''), null);
+  assert.equal(maxOfRange('   '), null);
+  assert.equal(maxOfRange('no numbers here'), null);
 });
 
 /* ---------- meal prefix ---------- */

@@ -1,9 +1,6 @@
 /**
- * Pure text-parsing / matching / formatting helpers for the Telegram food bot.
- * Plain JS (JSDoc-typed) so the Node built-in test runner can exercise it
- * without a TS build step. No DOM/DB/network access in this file.
- *
- * Nutrition scaling mirrors src/routes/logs.ts exactly: round2(per100 × grams/100).
+ * Plain-JS nutrition helpers shared by the web app and tests (no DOM/network).
+ * No DOM/DB/network access in this file.
  */
 
 /** @typedef {'breakfast'|'lunch'|'dinner'|'snack'} MealType */
@@ -19,6 +16,19 @@ export const MEAL_LABELS = { breakfast: 'Breakfast', lunch: 'Lunch', dinner: 'Di
 
 export function round2(v) {
   return Math.round(v * 100) / 100;
+}
+
+/** Pick the MAXIMUM from a value that may be a single number or a range, e.g.
+ *  "10-13 g" → 13, 12 → 12, "0.5–1.5 kg" → 1.5. Returns null on garbage. */
+export function maxOfRange(v) {
+  if (v == null) return null;
+  if (typeof v === 'number') return Number.isFinite(v) ? v : null;
+  const s = String(v);
+  if (!s.trim()) return null;
+  const norm = s.replace(/(\d),(\d{3})/g, '$1$2'); // "1,300" → "1300"
+  const nums = (norm.match(/\d+(?:[.,]\d+)?/g) || []).map((n) => Number(n.replace(',', '.')));
+  if (!nums.length) return null;
+  return Math.max(...nums);
 }
 
 /* ------------------------------------------------------------------ */

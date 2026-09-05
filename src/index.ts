@@ -4,6 +4,7 @@ import { requireAuth } from './auth';
 import authRoutes from './routes/auth';
 import profileRoutes from './routes/profile';
 import foodsRoutes from './routes/foods';
+import nutritionRoutes from './routes/nutrition';
 import logsRoutes from './routes/logs';
 import stepsRoutes from './routes/steps';
 import weightsRoutes from './routes/weights';
@@ -31,6 +32,7 @@ app.use('/api/*', async (c, next) => {
 app.route('/api/auth', authRoutes);
 app.route('/api/profile', profileRoutes);
 app.route('/api/foods', foodsRoutes);
+app.route('/api/nutrition', nutritionRoutes);
 app.route('/api/logs', logsRoutes);
 app.route('/api/steps', stepsRoutes);
 app.route('/api/weights', weightsRoutes);

@@ -273,8 +273,17 @@ export async function renderFoodsPage(root) {
   const parseNote = qs('#fm-parse-note', root);
 
   // ---- Paste-to-fill: turn pasted text into the form fields ----
-  //  • name + amount only  → look the food up in the catalog and auto-compute macros
+  //  • name + amount  → look the food up in the catalog; if not found, get an ONLINE
+  //    estimate (ranges always use the MAX, e.g. protein 10–13 g → 13 g)
+  //  • name only (no amount) → online estimate for the default 100 g serving
   //  • full nutrition labels → put each detected value into its matching field
+  const fillBtn = qs('#fm-parse-btn', root);
+  const fillBtnOriginal = fillBtn.innerHTML;
+  const setBusy = (busy) => {
+    fillBtn.disabled = busy;
+    fillBtn.innerHTML = busy ? 'Estimating…' : fillBtnOriginal;
+  };
+
   qs('#fm-parse-btn', root).addEventListener('click', async () => {
     const p = parseFoodText(parseInput.value);
     if (!p || (!p.name && p.calories == null && p.protein == null && p.carbs == null && p.fat == null)) {
@@ -285,36 +294,54 @@ export async function renderFoodsPage(root) {
     const e = addForm.elements;
     const hasLabels = p.calories != null || p.protein != null || p.carbs != null || p.fat != null;
 
-    // Only a name + an amount given → auto-compute macros from a matching catalog food.
-    if (p.name && p.grams && !hasLabels) {
+    // Name given (with or without an amount) → catalog first, online estimate next.
+    if (p.name && !hasLabels) {
+      const estimateGrams = p.grams || 100; // no amount typed → estimate the default 100 g serving
       let matched = null;
       try {
         const data = await api.get(`/api/foods?q=${encodeURIComponent(p.name)}`);
         const exact = data.foods.find((f) => f.name.trim().toLowerCase() === p.name.trim().toLowerCase());
         matched = exact || (data.foods.length === 1 ? data.foods[0] : null);
-      } catch { /* ignore → fall through to the manual fill below */ }
+      } catch { /* ignore → fall through to the online estimate below */ }
 
       if (matched) {
-        const k = p.grams / 100;
+        const k = estimateGrams / 100;
         const scale = (v) => round2(Number(v) * k);
         e.name.value = matched.name;
-        e.serving_grams.value = p.grams;
+        e.serving_grams.value = estimateGrams;
         e.calories.value = scale(matched.calories_per_100g);
         e.protein.value = scale(matched.protein_per_100g);
         e.carbs.value = scale(matched.carbs_per_100g);
         e.fat.value = scale(matched.fat_per_100g);
         parseNote.textContent =
-          `Matched “${matched.name}” — macros computed for ${fmt(p.grams)} g from its per-100 g profile (${fmt(matched.calories_per_100g)} kcal/100 g).`;
-        toast(`Filled from “${matched.name}” — ${fmt(p.grams)} g × per-100 g macros`);
+          `Matched “${matched.name}” — macros computed for ${fmt(estimateGrams)} g from its per-100 g profile (${fmt(matched.calories_per_100g)} kcal/100 g).`;
+        toast(`Filled from “${matched.name}” — ${fmt(estimateGrams)} g × per-100 g macros`);
         return;
       }
 
-      // Not found — fill the name + serving so the user just adds the macros.
-      e.name.value = p.name;
-      e.serving_grams.value = p.grams;
-      parseNote.textContent =
-        `“${p.name}” isn’t in your database — macros left blank for ${fmt(p.grams)} g. Add them below, or use the label-paste format.`;
-      toast(`“${p.name}” not found in your database`, 'error');
+      // Not found in the local database → ONLINE estimate, max of any range.
+      setBusy(true);
+      try {
+        const { estimate } = await api.post('/api/nutrition/estimate', { name: p.name, grams: estimateGrams });
+        e.name.value = estimate.name || p.name;
+        e.serving_grams.value = estimateGrams;
+        e.calories.value = estimate.calories;
+        e.protein.value = estimate.protein;
+        e.carbs.value = estimate.carbs;
+        e.fat.value = estimate.fat;
+        parseNote.textContent =
+          `“${estimate.name || p.name}” isn’t in your database — the macros above are an ONLINE ESTIMATE for ${fmt(estimateGrams)} g. Ranges always take the max (e.g. protein 10–13 g → 13 g). Review before adding.`;
+        toast(`Online estimate filled for “${estimate.name || p.name}” — max of ranges used`);
+      } catch (err) {
+        // Leave it to the user to fill in when no online source is available.
+        e.name.value = p.name;
+        if (p.grams) e.serving_grams.value = p.grams;
+        parseNote.textContent =
+          `“${p.name}” isn’t in your database, and the online estimate isn’t available (${err.message}). Macros left blank — add them below, or use the label-paste format.`;
+        toast(`Online estimate unavailable for “${p.name}”`, 'error');
+      } finally {
+        setBusy(false);
+      }
       return;
     }
 
