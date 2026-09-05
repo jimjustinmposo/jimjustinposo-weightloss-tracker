@@ -165,10 +165,22 @@ function parseFoodText(text) {
   if (!name) {
     const skipRe = /\b(calories?|kcal|protein|carbs?|carbohydrates?|fat|energy|servings?|per\s*\d+\s*g)\b/i;
     const candidate = lines.find((l) => !skipRe.test(l));
-    if (candidate) name = candidate.replace(/^[-•*>\d.]+\s*/, '');
+    if (candidate) {
+      // Strip a leading weight token ("300g chicken breast" → "chicken breast"),
+      // then any bullet/ordered-list marker ("1. Chicken" → "Chicken").
+      name = candidate
+        .replace(/^\s*\d+(?:\.\d+)?\s*(?:kg|kgs|kilograms?|kilos?|g|grams?|gr|gm)\b/gi, '')
+        .replace(/^[-•*>\d.]+\s*/, '')
+        .trim();
+    }
   }
   if (!name) name = lines[0];
-  name = String(name).replace(/[:;*\s]+$/, '').trim().slice(0, 120);
+  // Drop any weight amount from the name (e.g. "Sinigang 250g" → "Sinigang").
+  name = String(name)
+    .replace(/\b\d+(?:\.\d+)?\s*(?:kg|kgs|kilograms?|kilos?|g|grams?|gr|gm)\b/gi, '')
+    .replace(/[:;*\s]+$/, '')
+    .trim()
+    .slice(0, 120);
 
   // Calories may appear as "Calories: 95 kcal" or just "95 kcal".
   const kcalLabel = src.match(/\b(?:calories?|energy)\b[^\d\n]{0,40}(\d+(?:\.\d+)?)/i);
@@ -177,15 +189,32 @@ function parseFoodText(text) {
   // Optional serving size, e.g. "Serving: 250 g" → 250.
   const serving = src.match(/\bservings?\b[^\d\n]{0,30}?(\d+(?:\.\d+)?)\s*(?:g|grams?)\b/i);
 
+  // Plain weight amount outside any nutrition line — "250g" or "Sinigang 250 g".
+  // Used to auto-compute macros from the catalog and to fill the Serving (g) field.
+  let grams = null;
+  for (const line of lines) {
+    if (/\b(calories?|kcal|protein|carbs?|carbohydrates?|fat|energy|sugars?|fiber)\b/i.test(line)) continue;
+    const m = line.match(/\b(\d+(?:\.\d+)?)\s*(kg|kgs|kilograms?|kilos?|g|grams?|gr|gm)\b/i);
+    if (m) {
+      // kg / kilo / kgs → convert to grams (1 kg = 1000 g).
+      grams = m[2][0].toLowerCase() === 'k' ? Number(m[1]) * 1000 : Number(m[1]);
+      break;
+    }
+  }
+
   return {
     name,
     serving_grams: serving ? Number(serving[1]) : null,
+    grams,
     calories: kcalLabel ? Number(kcalLabel[1]) : (kcalUnit ? Number(kcalUnit[1]) : null),
     protein: grab(['protein']),
     carbs: grab(['carbs?', 'carbohydrates?']),
     fat: grab(['fat']),
   };
 }
+
+/* Round to 2 decimals for values placed into the form. */
+const round2 = (v) => Math.round((Number(v) || 0) * 100) / 100;
 
 /* ---------- Foods management page ---------- */
 export async function renderFoodsPage(root) {
@@ -206,12 +235,12 @@ export async function renderFoodsPage(root) {
         <h3>${icons.plus} Add New Food</h3>
         <div class="paste-box">
           <label for="fm-parse-input">Paste food details to auto-fill the form below:</label>
-          <textarea id="fm-parse-input" rows="5" spellcheck="false" placeholder="Sinigang&#10;Calories: 95 kcal&#10;Protein: 10 g&#10;Carbs: 7 g&#10;Fat: 3 g"></textarea>
+          <textarea id="fm-parse-input" rows="5" spellcheck="false" placeholder="Sinigang 250 g&#10;… or paste full labels:&#10;Sinigang&#10;Calories: 95 kcal&#10;Protein: 10 g&#10;Carbs: 7 g&#10;Fat: 3 g"></textarea>
           <div class="paste-actions">
             <button type="button" id="fm-parse-btn" class="btn sm">${icons.search} Fill form from text</button>
             <button type="button" id="fm-parse-clear" class="btn sm ghost">Clear</button>
           </div>
-          <div id="fm-parse-note" class="form-hint">Detected fields are filled in below — review, then click “Add to Database”.</div>
+          <div id="fm-parse-note" class="form-hint">Type just a food + amount (e.g. “Sinigang 250 g”) to auto-compute macros from your food database — or paste full nutrition labels. Review, then click “Add to Database”.</div>
         </div>
         <hr class="paste-sep" />
         <form id="fm-add">
@@ -219,7 +248,7 @@ export async function renderFoodsPage(root) {
             <input name="name" placeholder="e.g. Chicken breast raw" required /></div>
           <div class="form-row">
             <div class="field"><label>Serving (g)</label>
-              <input name="serving_grams" type="number" step="1" min="1" value="100" required /></div>
+              <input name="serving_grams" type="number" step="any" min="1" value="100" required /></div>
             <div class="field"><label>Calories (this serving)</label>
               <input name="calories" type="number" step="0.1" min="0" placeholder="165" required /></div>
           </div>
@@ -243,8 +272,10 @@ export async function renderFoodsPage(root) {
   const parseInput = qs('#fm-parse-input', root);
   const parseNote = qs('#fm-parse-note', root);
 
-  // ---- Paste-to-fill: turn pasted nutrition text into the form fields ----
-  qs('#fm-parse-btn', root).addEventListener('click', () => {
+  // ---- Paste-to-fill: turn pasted text into the form fields ----
+  //  • name + amount only  → look the food up in the catalog and auto-compute macros
+  //  • full nutrition labels → put each detected value into its matching field
+  qs('#fm-parse-btn', root).addEventListener('click', async () => {
     const p = parseFoodText(parseInput.value);
     if (!p || (!p.name && p.calories == null && p.protein == null && p.carbs == null && p.fat == null)) {
       parseNote.textContent = '';
@@ -252,17 +283,55 @@ export async function renderFoodsPage(root) {
       return;
     }
     const e = addForm.elements;
+    const hasLabels = p.calories != null || p.protein != null || p.carbs != null || p.fat != null;
+
+    // Only a name + an amount given → auto-compute macros from a matching catalog food.
+    if (p.name && p.grams && !hasLabels) {
+      let matched = null;
+      try {
+        const data = await api.get(`/api/foods?q=${encodeURIComponent(p.name)}`);
+        const exact = data.foods.find((f) => f.name.trim().toLowerCase() === p.name.trim().toLowerCase());
+        matched = exact || (data.foods.length === 1 ? data.foods[0] : null);
+      } catch { /* ignore → fall through to the manual fill below */ }
+
+      if (matched) {
+        const k = p.grams / 100;
+        const scale = (v) => round2(Number(v) * k);
+        e.name.value = matched.name;
+        e.serving_grams.value = p.grams;
+        e.calories.value = scale(matched.calories_per_100g);
+        e.protein.value = scale(matched.protein_per_100g);
+        e.carbs.value = scale(matched.carbs_per_100g);
+        e.fat.value = scale(matched.fat_per_100g);
+        parseNote.textContent =
+          `Matched “${matched.name}” — macros computed for ${fmt(p.grams)} g from its per-100 g profile (${fmt(matched.calories_per_100g)} kcal/100 g).`;
+        toast(`Filled from “${matched.name}” — ${fmt(p.grams)} g × per-100 g macros`);
+        return;
+      }
+
+      // Not found — fill the name + serving so the user just adds the macros.
+      e.name.value = p.name;
+      e.serving_grams.value = p.grams;
+      parseNote.textContent =
+        `“${p.name}” isn’t in your database — macros left blank for ${fmt(p.grams)} g. Add them below, or use the label-paste format.`;
+      toast(`“${p.name}” not found in your database`, 'error');
+      return;
+    }
+
+    // Full-label format: put each detected value into its matching field.
     if (p.name) e.name.value = p.name;
-    if (p.serving_grams) e.serving_grams.value = p.serving_grams;
+    const serving = p.serving_grams != null ? p.serving_grams : p.grams;
+    if (serving != null) e.serving_grams.value = serving;
     if (p.calories != null) e.calories.value = p.calories;
     if (p.protein != null) e.protein.value = p.protein;
     if (p.carbs != null) e.carbs.value = p.carbs;
     if (p.fat != null) e.fat.value = p.fat;
 
-    const labels = { name: 'Name', calories: 'Calories', protein: 'Protein', carbs: 'Carbs', fat: 'Fat' };
-    const got = Object.keys(labels).filter((k) => (k === 'name' ? p.name : p[k] != null));
+    const labels = { name: 'Name', serving_grams: 'Serving', calories: 'Calories', protein: 'Protein', carbs: 'Carbs', fat: 'Fat' };
+    const got = Object.keys(labels).filter((k) =>
+      k === 'name' ? !!p.name : (k === 'serving_grams' ? serving != null : p[k] != null));
     parseNote.textContent = `Filled ${got.map((k) => labels[k]).join(', ') || 'no fields'} — review, then click “Add to Database”.`;
-    toast(`Form filled from text — ${got.length}/5 fields detected`);
+    toast(`Form filled from text — ${got.length}/6 fields detected`);
   });
 
   qs('#fm-parse-clear', root).addEventListener('click', () => {
