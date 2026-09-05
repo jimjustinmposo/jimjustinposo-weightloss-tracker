@@ -333,12 +333,17 @@ export async function renderFoodsPage(root) {
           `“${estimate.name || p.name}” isn’t in your database — the macros above are an ONLINE ESTIMATE for ${fmt(estimateGrams)} g. Ranges always take the max (e.g. protein 10–13 g → 13 g). Review before adding.`;
         toast(`Online estimate filled for “${estimate.name || p.name}” — max of ranges used`);
       } catch (err) {
-        // Leave it to the user to fill in when no online source is available.
+        // No online source available — leave the name + serving and let the
+        // user fill the macros manually (or paste full nutrition labels).
+        const reason = err?.message || String(err);
+        let hint = 'Set AI_BASE_URL + AI_MODEL (.dev.vars) and start your AI server.';
+        if (err?.status === 503) hint = 'AI not configured — add AI_BASE_URL + AI_MODEL and start your AI server.';
+        else if (err?.status === 502) hint = 'AI request failed — check your AI endpoint and model name.';
         e.name.value = p.name;
         if (p.grams) e.serving_grams.value = p.grams;
         parseNote.textContent =
-          `“${p.name}” isn’t in your database, and the online estimate isn’t available (${err.message}). Macros left blank — add them below, or use the label-paste format.`;
-        toast(`Online estimate unavailable for “${p.name}”`, 'error');
+          `“${p.name}” — online estimate unavailable (${reason}). ${hint} Macros left blank; fill them below or paste full nutrition labels.`;
+        toast(`Online estimate unavailable — ${hint}`, 'error');
       } finally {
         setBusy(false);
       }
