@@ -225,7 +225,10 @@ async function boot() {
   // PWA: after first load online the app shell is cached for offline launches.
   if ('serviceWorker' in navigator) {
     window.addEventListener('load', () => {
-      navigator.serviceWorker.register('/sw.js').catch(() => {});
+      navigator.serviceWorker.register('/sw.js')
+        .then(() => navigator.serviceWorker.ready)
+        .then(() => console.log('[shell] offline app shell ready'))
+        .catch((err) => console.error('[shell] offline caching unavailable:', err));
     });
   }
 }
