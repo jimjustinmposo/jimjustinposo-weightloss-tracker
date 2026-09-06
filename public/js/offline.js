@@ -270,9 +270,10 @@ function opId() {
   return `op-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
 }
 async function enqueueOp(uid, op) {
+  const id = opId();
   const rec = {
-    id: opId(),
-    k: opId(),
+    id,
+    k: id,
     user_id: uid,
     seq: Date.now(),
     retries: 0,
