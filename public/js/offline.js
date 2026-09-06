@@ -31,19 +31,34 @@ export function getStatus() { return { ...status, online }; }
 
 /* ---------------- raw network helper (shared with api.js / sync.js) ---------------- */
 export async function raw(path, opts = {}) {
-  const res = await fetch(path, {
-    credentials: 'same-origin',
-    headers: { 'Content-Type': 'application/json', ...(opts.headers || {}) },
-    ...opts,
-  });
-  let data = {};
-  try { data = await res.json(); } catch { /* empty body */ }
-  if (!res.ok) {
-    const err = new Error(data.error || data.message || `Request failed (${res.status})`);
-    err.status = res.status;
+  const controller = new AbortController();
+  const timeout = opts.timeout ?? 15000; // fail fast instead of hanging on slow mobile links
+  const timer = setTimeout(() => controller.abort(), timeout);
+  try {
+    const res = await fetch(path, {
+      credentials: 'same-origin',
+      headers: { 'Content-Type': 'application/json', ...(opts.headers || {}) },
+      signal: controller.signal,
+      ...opts,
+    });
+    let data = {};
+    try { data = await res.json(); } catch { /* empty body */ }
+    if (!res.ok) {
+      const err = new Error(data.error || data.message || `Request failed (${res.status})`);
+      err.status = res.status;
+      throw err;
+    }
+    return data;
+  } catch (err) {
+    if (controller.signal.aborted) {
+      const te = new Error('Request timed out');
+      te.status = 0;
+      throw te;
+    }
     throw err;
+  } finally {
+    clearTimeout(timer);
   }
-  return data;
 }
 
 /** A network-style failure: no HTTP status attached (offline / DNS / timeout). */
