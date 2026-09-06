@@ -9,6 +9,8 @@
    ============================================================ */
 import offline from './offline.js';
 
+const opMaxRetries = 5; // after this many failures, an op is marked 'failed' (stops looping)
+
 let started = false;
 let running = false;
 let queued = false;
@@ -49,7 +51,14 @@ async function doSync(reason) {
   if (ops.length) offline.setStatus({ syncing: true });
 
   let networkDied = false;
+  let lastError = null;
   for (const op of ops) {
+    // Give up on ops that failed too many times — mark them 'failed' so they
+    // stop blocking the queue and looping forever. The user sees the count.
+    if ((op.retries || 0) >= opMaxRetries) {
+      await offline.markOpFailed(op.id, op.last_error || 'Failed after retries');
+      continue;
+    }
     try {
       await offline.pushOp(op);
       await offline.removeOp(op.id);
@@ -60,10 +69,10 @@ async function doSync(reason) {
         continue;
       }
       const network = offline.isNetworkError(err);
-      const retriable = network || !err.status || err.status === 429 || err.status >= 500;
+      lastError = network ? 'Network unavailable' : String(err.message || err).slice(0, 200);
       await offline.markOpResult(op.id, {
         retries: (op.retries || 0) + 1,
-        last_error: network ? 'Network unavailable' : String(err.message || err).slice(0, 300),
+        last_error: lastError,
       });
       if (network) {
         networkDied = true;
@@ -74,7 +83,7 @@ async function doSync(reason) {
     }
   }
 
-  offline.setStatus({ syncing: false });
+  offline.setStatus({ syncing: false, lastError: lastError || null });
 
   // After the queue drains, re-download the latest server state into the cache.
   if (!networkDied) {
@@ -82,7 +91,7 @@ async function doSync(reason) {
     if (remaining === 0) {
       offline.setStatus({ syncing: true });
       await offline.seedAll(uid);
-      offline.setStatus({ syncing: false });
+      offline.setStatus({ syncing: false, lastError: null });
       offline.notifyDataChanged();
     } else {
       // A few failed (non-network) ops remain — keep the cache as-is.

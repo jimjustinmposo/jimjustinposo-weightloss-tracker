@@ -22,7 +22,7 @@ let online = (typeof navigator !== 'undefined') ? navigator.onLine !== false : t
 let currentUserId = null;
 let connectionListeners = [];
 let dataChangedListeners = [];
-const status = { online: true, syncing: false, pending: 0, lastSyncAt: 0 };
+const status = { online: true, syncing: false, pending: 0, failed: 0, lastSyncAt: 0, lastError: null };
 
 export function isOnline() { return online; }
 export function isOffline() { return !online; }
@@ -63,7 +63,10 @@ export async function raw(path, opts = {}) {
 
 /** A network-style failure: no HTTP status attached (offline / DNS / timeout). */
 export function isNetworkError(err) {
-  return !err || typeof err.status !== 'number';
+  if (!err) return true;
+  const s = err.status;
+  // status 0 = aborted/timeout, undefined = offline/DNS. Both are transient.
+  return s === undefined || s === null || s === 0 || typeof s !== 'number';
 }
 /* ---------------- IndexedDB plumbing ---------------- */
 function promisify(req) {
@@ -305,6 +308,24 @@ export async function removeOp(id) {
   await storeDelete('ops', id);
   await refreshPendingCount();
 }
+/** Mark an op as permanently failed (stops retrying / looping). */
+export async function markOpFailed(id, lastError) {
+  await updateOp(id, { status: 'failed', last_error: String(lastError || 'Failed').slice(0, 300) });
+  await refreshPendingCount();
+}
+/** Retry a previously-failed op (resets it to pending). */
+export async function retryOp(id) {
+  await updateOp(id, { status: 'pending', retries: 0, last_error: null });
+  await refreshPendingCount();
+}
+export async function listFailedOps(uid) {
+  const all = await storeGetAll('ops');
+  return all.filter((o) => o.user_id === uid && o.status === 'failed').sort((a, b) => (b.seq - a.seq) || (a.id < b.id ? 1 : -1));
+}
+export async function countFailed(uid) {
+  if (uid == null) return 0;
+  return (await listFailedOps(uid)).length;
+}
 export async function markOpResult(id, patch) {
   await updateOp(id, patch);
   await refreshPendingCount();
@@ -316,6 +337,7 @@ async function findPendingOpFor(uid, pred) {
 export async function refreshPendingCount() {
   const uid = currentUserId ?? (await requireUserSafe());
   status.pending = uid ? await countPending(uid) : 0;
+  status.failed = uid ? await countFailed(uid) : 0;
   renderStatus();
   return status.pending;
 }
@@ -1140,23 +1162,51 @@ export function setStatus(patch) {
   renderStatus();
 }
 
+let retryWired = false;
+function wireRetryOnce() {
+  if (retryWired) return;
+  retryWired = true;
+  document.addEventListener('click', async (e) => {
+    const el = document.getElementById('conn-status');
+    if (!el || !el.classList.contains('st-failed') || !e.target.closest('#conn-status')) return;
+    const uid = getUser();
+    if (uid == null) return;
+    const failed = await listFailedOps(uid);
+    if (!failed.length) return;
+    for (const op of failed) await retryOp(op.id);
+    await refreshPendingCount();
+    // Fire a sync immediately so retries don't wait for the 60s timer.
+    if (typeof window !== 'undefined') window.dispatchEvent(new Event('online'));
+  });
+}
+
 export function renderStatus() {
   status.online = online;
   const el = typeof document !== 'undefined' ? document.getElementById('conn-status') : null;
   if (!el) return;
-  el.classList.remove('st-online', 'st-offline', 'st-syncing', 'st-pending');
+  wireRetryOnce();
+  el.classList.remove('st-online', 'st-offline', 'st-syncing', 'st-pending', 'st-failed');
   if (status.syncing) {
     el.textContent = 'Syncing…';
     el.classList.add('st-syncing');
+    el.title = 'Uploading your offline changes…';
+  } else if (status.failed > 0) {
+    el.textContent = `${status.failed} failed`;
+    el.classList.add('st-failed');
+    el.title = `Tap to retry. Last error: ${status.lastError || 'unknown'}`;
+    el.style.cursor = 'pointer';
   } else if (!online) {
     el.textContent = status.pending > 0 ? `Offline · ${status.pending} pending` : 'Offline';
     el.classList.add('st-offline');
+    el.title = 'Working offline — changes will sync when you reconnect';
   } else if (status.pending > 0) {
     el.textContent = `${status.pending} change${status.pending === 1 ? '' : 's'} to sync`;
     el.classList.add('st-pending');
+    el.title = 'Will sync automatically';
   } else {
     el.textContent = 'Online';
     el.classList.add('st-online');
+    el.title = 'All changes synced';
   }
 }
 
@@ -1189,6 +1239,10 @@ const api = {
   countPending,
   hasPending,
   markOpResult,
+  markOpFailed,
+  retryOp,
+  listFailedOps,
+  countFailed,
   removeOp,
   refreshPendingCount,
   pushOp,

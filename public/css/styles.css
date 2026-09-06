@@ -84,6 +84,8 @@ input, select { font: inherit; }
 .conn-pill.st-offline::before { background: var(--warning); }
 .conn-pill.st-pending::before { background: var(--secondary); }
 .conn-pill.st-syncing::before { background: var(--secondary); animation: connPulse 1s infinite; }
+.conn-pill.st-failed { color: #fff; }
+.conn-pill.st-failed::before { background: var(--danger); }
 @keyframes connPulse { 50% { opacity: .35; } }
 @media (max-width: 520px) {
   .conn-pill { max-width: 108px; overflow: hidden; text-overflow: ellipsis; }
