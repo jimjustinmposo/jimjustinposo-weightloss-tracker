@@ -211,6 +211,8 @@ async function boot() {
     const data = await api.get('/api/auth/me');
     App.user = data.user;
     App.profile = data.profile;
+    // Deterministically persist the session so offline boots find it.
+    await offline.persistSession(data.user, data.profile);
   } catch (err) {
     // Real auth failure (401) or no cached session → login screen.
     App.user = null;

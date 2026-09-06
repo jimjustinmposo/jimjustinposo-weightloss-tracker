@@ -181,13 +181,30 @@ async function requireUser() {
   return currentUserId;
 }
 
+/** Deterministically persist the session (user + profile + id) to local storage.
+ *  Used by boot() so an offline reload always finds a session — never fire-and-forget. */
+export async function persistSession(user, profile) {
+  if (!user?.id) return;
+  const uid = Number(user.id);
+  // IndexedDB distinguishes number keys from string keys, so always use a
+  // STRING key here to match what storeGet(key) looks up (it stringifies).
+  const key = String(uid);
+  try {
+    await storePut('users', { k: key, id: uid, email: user.email, name: user.name });
+    if (profile) await storePut('profiles', { ...profile, k: key, user_id: uid });
+    currentUserId = uid;
+    await kvSet('currentUserId', uid);
+  } catch (e) {
+    console.error('offline session persist failed:', e);
+  }
+}
+
 /** Store the freshly authenticated user (login/register) + remember the session. */
 export async function onAuthenticated(user, profile) {
   if (!user?.id) return;
   try {
-    await storePut('users', { k: user.id, id: user.id, email: user.email, name: user.name });
-    if (profile) await storePut('profiles', profile);
-    await setSession(user.id);
+    await persistSession(user, profile);
+    await refreshPendingCount();
   } catch (e) {
     console.error('offline cache unavailable:', e); // app still works online-only
   }
@@ -1135,6 +1152,9 @@ const api = {
   getUser,
   getStatus,
   setStatus,
+  onAuthenticated,
+  persistSession,
+  cacheGet,
   renderStatus,
   raw,
   isNetworkError,
