@@ -23,7 +23,8 @@ export function start() {
     if (document.visibilityState === 'visible') trigger('focus');
   });
   setInterval(() => {
-    if (offline.isOnline() && offline.getUser() != null) trigger('periodic');
+    const navOnline = typeof navigator === 'undefined' || navigator.onLine;
+    if (navOnline && offline.getUser() != null) trigger('periodic');
   }, 60000);
 }
 
@@ -50,8 +51,8 @@ async function doSync(reason) {
 
   if (ops.length) offline.setStatus({ syncing: true });
 
-  let networkDied = false;
   let lastError = null;
+  let failedThisRun = 0;
   for (const op of ops) {
     // Give up on ops that failed too many times — mark them 'failed' so they
     // stop blocking the queue and looping forever. The user sees the count.
@@ -68,34 +69,33 @@ async function doSync(reason) {
         await offline.removeOp(op.id);
         continue;
       }
-      const network = offline.isNetworkError(err);
-      lastError = network ? 'Network unavailable' : String(err.message || err).slice(0, 200);
+      lastError = String(err.message || err).slice(0, 200);
+      failedThisRun += 1;
+      // Increment the retry count but KEEP the op pending — it will be retried
+      // on the next sync trigger (timer / online event / tab focus).
+      // CRITICAL: do NOT call markOffline() here. A single failed push must
+      // never mark the whole system offline or break the loop — only the
+      // browser's own online/offline events control connectivity. Otherwise a
+      // flaky mobile link that times out once would kill all future syncs.
       await offline.markOpResult(op.id, {
         retries: (op.retries || 0) + 1,
         last_error: lastError,
       });
-      if (network) {
-        networkDied = true;
-        offline.markOffline();
-        break;
-      }
-      if (err.status >= 500) break; // server hiccup — stop, retry on next trigger
     }
   }
 
   offline.setStatus({ syncing: false, lastError: lastError || null });
 
   // After the queue drains, re-download the latest server state into the cache.
-  if (!networkDied) {
-    const remaining = await offline.countPending(uid);
-    if (remaining === 0) {
-      offline.setStatus({ syncing: true });
-      await offline.seedAll(uid);
-      offline.setStatus({ syncing: false, lastError: null });
-      offline.notifyDataChanged();
-    } else {
-      // A few failed (non-network) ops remain — keep the cache as-is.
-      await offline.refreshPendingCount();
-    }
+  const remaining = await offline.countPending(uid);
+  if (remaining === 0) {
+    offline.setStatus({ syncing: true });
+    await offline.seedAll(uid);
+    offline.setStatus({ syncing: false, lastError: null });
+    offline.notifyDataChanged();
+  } else if (failedThisRun) {
+    // Some ops failed but haven't hit max retries yet — refresh the pill so the
+    // pending count is accurate; they will retry on the next trigger.
+    await offline.refreshPendingCount();
   }
 }
