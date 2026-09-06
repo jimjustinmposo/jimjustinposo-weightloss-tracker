@@ -6,13 +6,36 @@
    • Every served response refreshes the cache in the background.
    • Bump CACHE_VERSION to invalidate all cached copies after a deploy.
    ============================================================ */
-const CACHE_VERSION = 'v1';
+const CACHE_VERSION = 'v2';
 const CACHE_NAME = `wls-shell-${CACHE_VERSION}`;
 const SKIP_PREFIXES = ['/api/', '/cdn-cgi/'];
 
+const SHELL_ASSETS = [
+  '/',
+  '/css/styles.css',
+  '/manifest.webmanifest',
+  '/icon.svg',
+  '/js/app.js',
+  '/js/api.js',
+  '/js/state.js',
+  '/js/util.js',
+  '/js/charts.js',
+  '/js/offline.js',
+  '/js/offline-math.js',
+  '/js/sync.js',
+  '/js/dashboard.js',
+  '/js/foods.js',
+  '/js/history.js',
+  '/js/profile.js',
+  '/js/steps.js',
+];
+
 self.addEventListener('install', (e) => {
-  self.skipWaiting();
-  e.waitUntil(caches.open(CACHE_NAME).then((c) => c.addAll?.([])));
+  e.waitUntil(
+    caches.open(CACHE_NAME)
+      .then((c) => c.addAll(SHELL_ASSETS))
+      .then(() => self.skipWaiting())
+  );
 });
 
 self.addEventListener('activate', (e) => {

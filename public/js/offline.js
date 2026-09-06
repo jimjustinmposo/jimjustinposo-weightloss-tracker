@@ -488,18 +488,22 @@ export async function cacheGet(path) {
 export async function cachePutFromGet(path, data) {
   if (!data) return;
   const { path: p, params } = parseUrl(path);
+
+  // /api/auth/me IS the live server session — always persist it, even on the
+  // very first visit when no local session exists yet. This is what makes
+  // offline boots possible afterwards (cookie-based sign-in).
+  if (p === '/api/auth/me') {
+    if (!data.user) return;
+    await storePut('users', { k: data.user.id, id: data.user.id, email: data.user.email, name: data.user.name });
+    if (data.profile) await storePut('profiles', { ...data.profile, k: data.user.id, user_id: data.user.id });
+    await setSession(data.user.id);
+    return;
+  }
+
   const uid = currentUserId ?? (await restoreSessionSafe());
   if (uid == null) return;
 
   switch (p) {
-    case '/api/auth/me': {
-      if (!data.user) break;
-      if (Number(data.user.id) !== Number(uid)) break; // never mix another account's session
-      await storePut('users', { k: data.user.id, id: data.user.id, email: data.user.email, name: data.user.name });
-      if (data.profile) await storePut('profiles', { ...data.profile, k: data.user.id, user_id: data.user.id });
-      await setSession(data.user.id);
-      break;
-    }
     case '/api/profile':
       if (data.profile) await storePut('profiles', { ...data.profile, k: data.profile.user_id ?? uid, user_id: data.profile.user_id ?? uid });
       break;
