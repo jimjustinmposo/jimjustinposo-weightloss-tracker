@@ -1,0 +1,19 @@
+{
+  "name": "WeightLoss Tracker",
+  "short_name": "WeightLoss",
+  "description": "Personal weight loss & nutrition tracker",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#FAFBFF",
+  "theme_color": "#1976D2",
+  "icons": [
+    {
+      "src": "/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ]
+}

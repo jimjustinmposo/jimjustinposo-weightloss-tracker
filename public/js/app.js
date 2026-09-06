@@ -1,4 +1,6 @@
 import api from './api.js';
+import offline from './offline.js';
+import * as sync from './sync.js';
 import { App, profileComplete } from './state.js';
 import { icons, toast, esc, qs } from './util.js';
 import { renderDashboard } from './dashboard.js';
@@ -31,6 +33,7 @@ function buildShell() {
       </nav>
       <div class="spacer"></div>
       <div class="userchip">
+        <span class="conn-pill" id="conn-status" title="Sync status"></span>
         <div class="avatar">${icons.user}</div>
         <span class="uname" title="${esc(App.user?.email || '')}">${esc(name)}</span>
         <button class="icon-btn" id="logout-btn" title="Log out">${icons.logout}</button>
@@ -40,12 +43,14 @@ function buildShell() {
       ${NAV.map((n) => `<a href="${n.hash}" data-nav="${n.hash}">${icons[n.icon]}<span>${n.label}</span></a>`).join('')}
     </nav>`;
   shell().dataset.built = '1';
+  offline.renderStatus();
   document.getElementById('logout-btn').addEventListener('click', async () => {
     try {
       await api.post('/api/auth/logout');
     } catch { /* ignore */ }
     App.user = null;
     App.profile = null;
+    await offline.clearSession();
     document.body.classList.remove('app-shell');
     delete shell().dataset.built;
     shell().innerHTML = '';
@@ -98,6 +103,8 @@ function renderLogin() {
       const data = await api.post('/api/auth/login', { email: f.email.value.trim(), password: f.password.value });
       App.user = data.user;
       App.profile = data.profile;
+      await offline.onAuthenticated(data.user, data.profile);
+      sync.trigger('login');
       location.hash = profileComplete(App.profile) ? '#/dashboard' : '#/onboarding';
     } catch (err) {
       errEl.textContent = err.message;
@@ -138,6 +145,8 @@ function renderRegister() {
       });
       App.user = data.user;
       App.profile = data.profile;
+      await offline.onAuthenticated(data.user, data.profile);
+      sync.trigger('login');
       location.hash = '#/onboarding';
     } catch (err) {
       errEl.textContent = err.message;
@@ -190,15 +199,35 @@ async function route() {
 }
 
 async function boot() {
+  await offline.init();
+  sync.start();
+
+  // After a background sync finishes, refresh the visible view with fresh data.
+  offline.addDataChangedListener(() => {
+    if (App.user) route();
+  });
+
   try {
     const data = await api.get('/api/auth/me');
     App.user = data.user;
     App.profile = data.profile;
-  } catch {
+  } catch (err) {
+    // Real auth failure (401) or no cached session → login screen.
     App.user = null;
+    App.profile = null;
   }
   window.addEventListener('hashchange', route);
   await route();
+
+  // Background pass: flush queued changes + seed the local cache for offline use.
+  sync.trigger('boot');
+
+  // PWA: after first load online the app shell is cached for offline launches.
+  if ('serviceWorker' in navigator) {
+    window.addEventListener('load', () => {
+      navigator.serviceWorker.register('/sw.js').catch(() => {});
+    });
+  }
 }
 
 boot();

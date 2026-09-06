@@ -20,8 +20,9 @@ export const DIET_OPTIONS = [
   ['omad_carnivore', 'OMAD Carnivore', '0 g carbs · eat all targets in ONE meal'],
 ];
 
-/* Frontend mirror of the server-side calculations for instant preview. */
-function preview(p) {
+/* Frontend mirror of the server-side calculations for instant preview.
+   Exported so the offline layer reuses the exact same math for local saves. */
+export function preview(p) {
   const bmr = (() => {
     const base = 10 * p.weight + 6.25 * p.height - 5 * p.age;
     if (p.gender === 'male') return base + 5;

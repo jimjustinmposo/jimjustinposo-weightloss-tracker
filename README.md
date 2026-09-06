@@ -28,6 +28,27 @@ A fullstack webapp built entirely on **Cloudflare**:
   daily food intake record, BMI/TDEE badges
 - **Mobile-first UX** — bottom nav on phones, responsive card grid, spec palette
   (`#1976D2 / #64B5F6 / #FAFBFF / #43A047 …`)
+- **Offline-first** — the app keeps working with no internet: entries are stored
+  in **IndexedDB** and auto-synced to D1 when connectivity returns
+
+## Offline mode
+
+| Layer | What it does |
+|-------|--------------|
+| `public/js/api.js` | Data-access layer: online → existing Hono API (unchanged), offline → local cache |
+| `public/js/offline.js` | IndexedDB stores (foods · food logs · weights · steps · profile · users) + persistent **sync queue** + status pill |
+| `public/js/offline-math.js` | Pure mirror of the server's dashboard/log/steps aggregation SQL (unit-tested) |
+| `public/js/sync.js` | Background engine: flushes the queue on start / `online` / refocus / 60 s timer, then re-downloads latest server data |
+| `public/sw.js` + `manifest.webmanifest` | PWA: app-shell cache so the app installs and launches offline |
+
+- Offline creates/edits/deletes appear instantly and survive refresh/restart.
+- Sync is **idempotent**: locally created food logs carry a `client_id`
+  (unique index on `food_logs.client_id`, migration `0004`) so retries can never
+  duplicate rows; weight/step logs upsert by `(user, date)` and foods by
+  `(user, name)` exactly as before.
+- Data is per-user scoped; logging out clears the local session.
+- Online-only features (AI nutrition estimate/photo identify, login, Telegram)
+  show a clear message when offline.
 
 ## Local development
 

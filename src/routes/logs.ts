@@ -64,19 +64,31 @@ export type NewLogEntry = {
   protein: number;
   carbs: number;
   fat: number;
+  /** Client-generated id used by the offline sync queue for idempotent creates. */
+  clientId?: string | null;
 };
 
-/** Insert one food log row and return the stored entry (shared with Telegram). */
+/** Insert one food log row and return the stored entry (shared with Telegram).
+ *  When `clientId` is present the insert is idempotent: retrying the same
+ *  create (after e.g. a timeout) returns the already-inserted row instead of
+ *  creating a duplicate. */
 export async function insertFoodLog(db: D1Database, userId: number, p: NewLogEntry): Promise<LogRow> {
+  const clientId = typeof p.clientId === 'string' && p.clientId ? p.clientId.slice(0, 120) : null;
   const res = await db.prepare(
-    `INSERT INTO food_logs (user_id, food_id, name, meal, grams, calories, protein, carbs, fat, log_date)
-     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)`
+    `INSERT INTO food_logs (user_id, food_id, name, meal, grams, calories, protein, carbs, fat, log_date, client_id)
+     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
+     ON CONFLICT(client_id) DO NOTHING`
   )
-    .bind(userId, p.foodId, p.name, p.meal, p.grams, p.calories, p.protein, p.carbs, p.fat, p.date)
+    .bind(userId, p.foodId, p.name, p.meal, p.grams, p.calories, p.protein, p.carbs, p.fat, p.date, clientId)
     .run();
-  return (await db.prepare('SELECT * FROM food_logs WHERE id = ?1')
-    .bind(res.meta.last_row_id as number)
-    .first<LogRow>())!;
+  const row = clientId
+    ? await db.prepare('SELECT * FROM food_logs WHERE client_id = ?1 AND user_id = ?2')
+        .bind(clientId, userId)
+        .first<LogRow>()
+    : await db.prepare('SELECT * FROM food_logs WHERE id = ?1')
+        .bind(res.meta.last_row_id as number)
+        .first<LogRow>();
+  return row!;
 }
 
 app.get('/', async (c) => {
@@ -196,6 +208,7 @@ app.post('/', async (c) => {
     protein,
     carbs,
     fat,
+    clientId: typeof body.client_id === 'string' ? body.client_id : null,
   });
   return c.json({ entry }, 201);
 });
