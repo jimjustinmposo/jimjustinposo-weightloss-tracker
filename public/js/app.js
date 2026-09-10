@@ -6,6 +6,7 @@ import { icons, toast, esc, qs } from './util.js';
 import { renderDashboard } from './dashboard.js';
 import { renderFoodsPage } from './foods.js';
 import { renderSteps } from './steps.js';
+import { renderPushups } from './pushups.js';
 import { renderHistory } from './history.js';
 import { renderProfilePage } from './profile.js';
 
@@ -16,6 +17,7 @@ const NAV = [
   { hash: '#/dashboard', label: 'Dashboard', icon: 'home' },
   { hash: '#/foods', label: 'Foods', icon: 'utensils' },
   { hash: '#/steps', label: 'Steps', icon: 'steps' },
+  { hash: '#/pushups', label: 'Pushups', icon: 'pushups' },
   { hash: '#/history', label: 'History', icon: 'chart' },
   { hash: '#/profile', label: 'Profile', icon: 'user' },
 ];
@@ -159,6 +161,7 @@ const routes = {
   '#/dashboard': renderDashboard,
   '#/foods': renderFoodsPage,
   '#/steps': renderSteps,
+  '#/pushups': renderPushups,
   '#/history': renderHistory,
   '#/profile': renderProfilePage,
   '#/onboarding': renderProfilePage,

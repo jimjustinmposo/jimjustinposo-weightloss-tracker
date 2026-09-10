@@ -36,6 +36,7 @@ app.put('/', async (c) => {
   const dietType = String(body.diet_type ?? 'normal') as DietType;
   let weeklyGoalKg = num(body.weekly_goal_kg, 0.5);
   const stepGoal = Math.round(num(body.step_goal, 10000));
+  const pushupGoal = Math.round(num(body.pushup_goal, 50));
   const name = String(body.name ?? '').trim().slice(0, 60) || null;
 
   if (!Number.isFinite(age) || age < 10 || age > 100) throw new HTTPException(400, { message: 'Age must be between 10 and 100.' });
@@ -49,6 +50,9 @@ app.put('/', async (c) => {
   weeklyGoalKg = goalType === 'maintain' ? 0 : Math.min(Math.max(weeklyGoalKg, 0.1), 1.5);
   if (!Number.isFinite(stepGoal) || stepGoal < 1000 || stepGoal > 100000) {
     throw new HTTPException(400, { message: 'Step goal must be between 1,000 and 100,000.' });
+  }
+  if (!Number.isFinite(pushupGoal) || pushupGoal < 1 || pushupGoal > 100000) {
+    throw new HTTPException(400, { message: 'Pushup goal must be between 1 and 100,000.' });
   }
 
   const existing = await c.env.DB
@@ -74,14 +78,14 @@ app.put('/', async (c) => {
   const insertWithDiet = c.env.DB.prepare(
     `INSERT INTO profiles (
        user_id, name, age, gender, height_cm, activity_level, start_weight, current_weight,
-       goal_type, weekly_goal_kg, step_goal, diet_type, bmr, tdee, bmi, bmi_category,
+       goal_type, weekly_goal_kg, step_goal, pushup_goal, diet_type, bmr, tdee, bmi, bmi_category,
        calorie_target, protein_target, carb_target, fat_target, updated_at
-     ) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20, datetime('now'))
+     ) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21, datetime('now'))
      ON CONFLICT(user_id) DO UPDATE SET
        name=excluded.name, age=excluded.age, gender=excluded.gender, height_cm=excluded.height_cm,
        activity_level=excluded.activity_level, start_weight=excluded.start_weight,
        current_weight=excluded.current_weight, goal_type=excluded.goal_type,
-       weekly_goal_kg=excluded.weekly_goal_kg, step_goal=excluded.step_goal,
+       weekly_goal_kg=excluded.weekly_goal_kg, step_goal=excluded.step_goal, pushup_goal=excluded.pushup_goal,
        diet_type=excluded.diet_type,
        bmr=excluded.bmr, tdee=excluded.tdee, bmi=excluded.bmi, bmi_category=excluded.bmi_category,
        calorie_target=excluded.calorie_target, protein_target=excluded.protein_target,
@@ -91,14 +95,14 @@ app.put('/', async (c) => {
   const insertLegacy = c.env.DB.prepare(
     `INSERT INTO profiles (
        user_id, name, age, gender, height_cm, activity_level, start_weight, current_weight,
-       goal_type, weekly_goal_kg, step_goal, bmr, tdee, bmi, bmi_category,
+       goal_type, weekly_goal_kg, step_goal, pushup_goal, bmr, tdee, bmi, bmi_category,
        calorie_target, protein_target, carb_target, fat_target, updated_at
-     ) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19, datetime('now'))
+     ) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20, datetime('now'))
      ON CONFLICT(user_id) DO UPDATE SET
        name=excluded.name, age=excluded.age, gender=excluded.gender, height_cm=excluded.height_cm,
        activity_level=excluded.activity_level, start_weight=excluded.start_weight,
        current_weight=excluded.current_weight, goal_type=excluded.goal_type,
-       weekly_goal_kg=excluded.weekly_goal_kg, step_goal=excluded.step_goal,
+       weekly_goal_kg=excluded.weekly_goal_kg, step_goal=excluded.step_goal, pushup_goal=excluded.pushup_goal,
        bmr=excluded.bmr, tdee=excluded.tdee, bmi=excluded.bmi, bmi_category=excluded.bmi_category,
        calorie_target=excluded.calorie_target, protein_target=excluded.protein_target,
        carb_target=excluded.carb_target, fat_target=excluded.fat_target,
@@ -106,13 +110,13 @@ app.put('/', async (c) => {
 
   const dietArgs = [
     userId, name, age, gender, heightCm, activityLevel, startWeight, currentWeight,
-    goalType, weeklyGoalKg, stepGoal, dietType,
+    goalType, weeklyGoalKg, stepGoal, pushupGoal, dietType,
     targets.bmr, targets.tdee, targets.bmi, targets.bmi_category,
     targets.calorie_target, targets.protein_target, targets.carb_target, targets.fat_target,
   ] as const;
   const legacyArgs = [
     userId, name, age, gender, heightCm, activityLevel, startWeight, currentWeight,
-    goalType, weeklyGoalKg, stepGoal,
+    goalType, weeklyGoalKg, stepGoal, pushupGoal,
     targets.bmr, targets.tdee, targets.bmi, targets.bmi_category,
     targets.calorie_target, targets.protein_target, targets.carb_target, targets.fat_target,
   ] as const;
@@ -140,6 +144,22 @@ app.put('/', async (c) => {
           await saveDiet();
         } else {
           // Last resort: save without the diet column (old behaviour).
+          await saveLegacy();
+        }
+      }
+    } else if (/pushup_goal|no such column/i.test(msg)) {
+      /* Database predates migration 0005 (missing pushup_goal column).
+         Self-heal: add the column, then retry. */
+      try {
+        await c.env.DB
+          .prepare("ALTER TABLE profiles ADD COLUMN pushup_goal INTEGER NOT NULL DEFAULT 50")
+          .run();
+        await saveDiet();
+      } catch (healErr) {
+        const healMsg = String((healErr as Error)?.message ?? '');
+        if (/duplicate column name/i.test(healMsg)) {
+          await saveDiet();
+        } else {
           await saveLegacy();
         }
       }

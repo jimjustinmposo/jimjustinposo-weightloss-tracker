@@ -18,6 +18,7 @@ const SQL_DAY_TOTALS = `SELECT COALESCE(SUM(calories),0) AS calories, COALESCE(S
         COALESCE(SUM(carbs),0) AS carbs, COALESCE(SUM(fat),0) AS fat
  FROM food_logs WHERE user_id = ?1 AND log_date = ?2`;
 const SQL_STEPS_TODAY = 'SELECT steps, calories_burned FROM step_logs WHERE user_id = ?1 AND log_date = ?2';
+const SQL_PUSHUPS_TODAY = 'SELECT pushups, calories_burned FROM pushup_logs WHERE user_id = ?1 AND log_date = ?2';
 
 /**
  * One day's consumed/burned/net totals — reused by the Telegram /today and
@@ -52,7 +53,7 @@ app.get('/', async (c) => {
 
   const rangeStart = shift(date, -6);
 
-  const [profileRow, totalsRow, mealsRows, stepsTodayRow, weightsRows, stepsSeriesRows, calSeriesRows] =
+  const [profileRow, totalsRow, mealsRows, stepsTodayRow, pushupsTodayRow, weightsRows, stepsSeriesRows, pushupsSeriesRows, calSeriesRows] =
     await Promise.all([
       c.env.DB.prepare('SELECT * FROM profiles WHERE user_id = ?1').bind(userId).first<Any>(),
       c.env.DB.prepare(SQL_DAY_TOTALS).bind(userId, date).first<Any>(),
@@ -62,6 +63,7 @@ app.get('/', async (c) => {
         .bind(userId, date)
         .all<Any>(),
       c.env.DB.prepare(SQL_STEPS_TODAY).bind(userId, date).first<Any>(),
+      c.env.DB.prepare(SQL_PUSHUPS_TODAY).bind(userId, date).first<Any>(),
       c.env.DB.prepare('SELECT log_date, weight FROM weight_logs WHERE user_id = ?1 ORDER BY log_date DESC LIMIT 90')
         .bind(userId)
         .all<Any>(),
@@ -73,6 +75,18 @@ app.get('/', async (c) => {
                 COALESCE(sl.steps, 0) AS steps,
                 COALESCE(sl.calories_burned, 0) AS calories_burned
          FROM seq s LEFT JOIN step_logs sl ON sl.user_id = ?1 AND sl.log_date = s.d
+         ORDER BY s.d`
+      )
+        .bind(userId, rangeStart, date)
+        .all<Any>(),
+      c.env.DB.prepare(
+        `WITH RECURSIVE seq(d) AS (
+           SELECT ?2 UNION ALL SELECT date(d, '+1 day') FROM seq WHERE d < ?3
+         )
+         SELECT s.d AS log_date,
+                COALESCE(pl.pushups, 0) AS pushups,
+                COALESCE(pl.calories_burned, 0) AS calories_burned
+         FROM seq s LEFT JOIN pushup_logs pl ON pl.user_id = ?1 AND pl.log_date = s.d
          ORDER BY s.d`
       )
         .bind(userId, rangeStart, date)
@@ -97,6 +111,8 @@ app.get('/', async (c) => {
   };
   const steps = Number(stepsTodayRow?.steps ?? 0);
   const burnedSteps = Math.round(Number(stepsTodayRow?.calories_burned ?? 0) * 10) / 10;
+  const pushups = Number(pushupsTodayRow?.pushups ?? 0);
+  const burnedPushups = Math.round(Number(pushupsTodayRow?.calories_burned ?? 0) * 10) / 10;
 
   const targets = profileRow
     ? {
@@ -109,6 +125,7 @@ app.get('/', async (c) => {
         carb_target: profileRow.carb_target,
         fat_target: profileRow.fat_target,
         step_goal: profileRow.step_goal,
+        pushup_goal: profileRow.pushup_goal,
         goal_type: profileRow.goal_type,
         weekly_goal_kg: profileRow.weekly_goal_kg,
         current_weight: profileRow.current_weight,
@@ -131,12 +148,15 @@ app.get('/', async (c) => {
     targets,
     consumed,
     steps,
+    pushups,
     burned_steps: burnedSteps,
+    burned_pushups: burnedPushups,
     net_calories: netCalories,
     remaining_calories: remaining,
     meals,
     weight_series: weightsRows.results.slice().reverse(),
     steps_series: stepsSeriesRows.results,
+    pushups_series: pushupsSeriesRows.results,
     calories_series: calSeriesRows.results,
   });
 });

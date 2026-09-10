@@ -119,6 +119,38 @@ export function stepsModal(onSaved, entry = null) {
     }
   });
 }
+export function pushupsModal(onSaved, entry = null) {
+  const goal = App.profile?.pushup_goal ?? 50;
+  const editing = !!entry;
+  const { overlay, close } = openModal({
+    title: editing ? 'Edit pushups' : 'Add pushups',
+    body: `
+      <form id="p-form">
+        <div class="form-row">
+          <div class="field"><label>Date</label>
+            <input type="date" name="date" value="${esc(entry?.log_date ?? todayStr())}" max="${todayStr()}" required /></div>
+          <div class="field"><label>Pushups</label>
+            <input type="number" name="pushups" step="1" min="0" max="50000" placeholder="e.g. 50"
+              value="${entry?.pushups != null ? Number(entry.pushups) : ''}" required /></div>
+        </div>
+        <p class="form-hint">Calories burned are estimated from your body weight. Daily goal: ${fmt(goal)} pushups.</p>
+        <br/>
+        <button class="btn block accent" type="submit">${icons.pushups} ${editing ? 'Update Pushups' : 'Save Pushups'}</button>
+      </form>`,
+  });
+  qs('#p-form', overlay).addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const f = e.target;
+    try {
+      await api.post('/api/pushups', { date: f.date.value, pushups: Number(f.pushups.value) });
+      close();
+      toast(editing ? 'Pushups updated' : 'Pushups saved');
+      onSaved?.();
+    } catch (err) {
+      toast(err.message, 'error');
+    }
+  });
+}
 /* ---------- Amount math for the Edit-Food modal ---------- */
 /* Lets users type a plain number ("100"), a relative adjustment ("+50",
    "-20", "*2", "/3") or a full expression ("100+100") into the Amount field.
@@ -302,6 +334,7 @@ export async function renderDashboard(root) {
   const consumed = d.consumed;
   const calorieTarget = Number(t?.calorie_target ?? 0);
   const stepGoal = Number(t?.step_goal ?? 10000);
+  const pushupGoal = Number(t?.pushup_goal ?? 50);
 
   /* ---- rings & macros ---- */
   const calRingPct = calorieTarget ? (consumed.calories / calorieTarget) * 100 : 0;
@@ -327,6 +360,7 @@ export async function renderDashboard(root) {
         <button class="btn accent" id="qa-food">${icons.plus} Log Food</button>
         <button class="btn ghost" id="qa-weight">${icons.scale} Log Weight</button>
         <button class="btn ghost" id="qa-steps">${icons.steps} Add Steps</button>
+        <button class="btn ghost" id="qa-pushups">${icons.pushups} Add Pushups</button>
       </div>
     </section>`;
 
@@ -347,6 +381,11 @@ export async function renderDashboard(root) {
         <h3>${icons.steps} Steps</h3>
         ${ring({ pct: stepPct, size: 132, color: 'var(--accent)', big: fmt(d.steps), sub: `of ${fmt(stepGoal)}` })}
         <p style="font-size:12px;color:var(--muted);margin-top:8px">≈ <b>${fmt(d.burned_steps)}</b> kcal burned walking</p>
+      </div>
+      <div class="card" style="text-align:center">
+        <h3>${icons.pushups} Pushups</h3>
+        ${ring({ pct: pushupGoal ? (d.pushups / pushupGoal) * 100 : 0, size: 132, color: 'var(--danger)', big: fmt(d.pushups), sub: `of ${fmt(pushupGoal)}` })}
+        <p style="font-size:12px;color:var(--muted);margin-top:8px">≈ <b>${fmt(d.burned_pushups)}</b> kcal burned doing pushups</p>
       </div>
       <div class="card">
         <h3>${icons.utensils} Macros today ${dietSuffix}</h3>
@@ -386,6 +425,13 @@ export async function renderDashboard(root) {
     { color: '#43A047', height: 210, target: stepGoal })}
     </div>`;
 
+  const pushupsChart = `
+    <div class="card">
+      <h3>${icons.pushups} Pushups — last 7 days</h3>
+      ${barChart((d.pushups_series || []).map((s) => ({ label: s.log_date, value: Number(s.pushups) })),
+    { color: '#E53935', height: 210, target: pushupGoal })}
+    </div>`;
+
   const calChart = `
     <div class="card">
       <h3>${icons.flame} Calories — last 7 days</h3>
@@ -417,7 +463,7 @@ export async function renderDashboard(root) {
       </div>
     </section>
     <br/>
-    <section class="charts-grid">${weightChart}${stepsChart}${calChart}</section>
+    <section class="charts-grid">${weightChart}${stepsChart}${pushupsChart}${calChart}</section>
     <br/>
     <section class="card">
       <h3>${icons.utensils} Daily Food Intake Record — ${new Date(date + 'T00:00').toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}</h3>
@@ -434,6 +480,7 @@ export async function renderDashboard(root) {
   });
   qs('#qa-weight', root).addEventListener('click', () => weightModal(() => renderDashboard(root)));
   qs('#qa-steps', root).addEventListener('click', () => stepsModal(() => renderDashboard(root)));
+  qs('#qa-pushups', root).addEventListener('click', () => pushupsModal(() => renderDashboard(root)));
   qs('#qa-food', root).addEventListener('click', () => foodPickerModal(() => renderDashboard(root)));
 
   qsa('.del-log', root).forEach((btn) =>

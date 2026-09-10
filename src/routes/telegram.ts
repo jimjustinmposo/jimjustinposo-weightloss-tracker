@@ -4,6 +4,7 @@ import type { MealType } from '../types';
 import { getCatalogFood, insertFoodLog, scaleFood } from './logs';
 import { applyWeightLog } from './weights';
 import { applyStepLog } from './steps';
+import { applyPushupLog } from './pushups';
 import { getDaySummary } from './dashboard';
 import { AiUnavailableError, extractFoods } from '../telegram/ai';
 import {
@@ -302,6 +303,27 @@ async function handleText(env: Env, chatId: number, telegramUserId: number, text
     } catch (e) {
       console.error('[telegram] natural steps failed:', e);
       await sendMessage(env, chatId, '⚠️ Could not save your steps right now. Please try again.');
+    }
+    return;
+  }
+
+  /* ---- natural-language PUSHUPS: "did 50 pushups", "50 pushups today", "pushups: 50" ---- */
+  const pMatch =
+    /(\d[\d,]*)\s*(?:pushups?|pushup|pups?|push-ups?)\b/i.exec(text) ||
+    /\bpushups?\b\s*(?:count|total)?\s*[:=]?\s*(\d[\d,]*)/i.exec(text);
+  if (pMatch) {
+    const n = Number(pMatch[1].replace(/,/g, ''));
+    if (!Number.isFinite(n) || n < 0 || n > 50000) {
+      await sendMessage(env, chatId, '⚠️ Pushups must be between 0 and 50,000. Example: did 50 pushups');
+      return;
+    }
+    try {
+      const log = await applyPushupLog(db, userId, botToday(env), n);
+      const burned = Math.round(Number(log?.calories_burned ?? 0) * 10) / 10;
+      await sendMessage(env, chatId, `💪 Pushups recorded\n\n${n.toLocaleString('en-US')} pushups\n≈ ${burned} kcal burned`);
+    } catch (e) {
+      console.error('[telegram] natural pushups failed:', e);
+      await sendMessage(env, chatId, '⚠️ Could not save your pushups right now. Please try again.');
     }
     return;
   }

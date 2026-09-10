@@ -76,6 +76,7 @@ export const icons = {
   utensils: ic('<path d="M5 3v7a2 2 0 0 0 4 0V3"/><path d="M7 3v18"/><path d="M17 3c-1.8 0-3 1.7-3 3.6V13h3v8"/>'),
   scale: ic('<rect x="4" y="5" width="16" height="15" rx="3"/><path d="M12 5V3"/><path d="M8.5 13.5a3.5 3.5 0 0 1 7 0z"/>'),
   steps: ic('<ellipse cx="7.5" cy="7.5" rx="2.4" ry="4.2"/><ellipse cx="16.5" cy="14" rx="2.4" ry="4.2"/><circle cx="5" cy="14.5" r=".7"/><circle cx="10" cy="14.5" r=".7"/><circle cx="14" cy="21" r=".7"/><circle cx="19" cy="21" r=".7"/>'),
+  pushups: ic('<rect x="5" y="17" width="2" height="6"/><rect x="10" y="13" width="2" height="10"/><rect x="15" y="9" width="2" height="12"/><rect x="20" y="5" width="2" height="16"/><circle cx="6" cy="5" r="2"/><circle cx="11" cy="3" r="2"/><circle cx="16" cy="1" r="2"/><circle cx="21" cy="1" r="2"/>'),
   chart: ic('<polyline points="3 17 9 11 13 15 21 7"/><polyline points="15 7 21 7 21 13"/>'),
   user: ic('<path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/>'),
   logout: ic('<path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/>'),

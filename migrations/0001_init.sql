@@ -30,6 +30,7 @@ CREATE TABLE IF NOT EXISTS profiles (
   goal_type TEXT NOT NULL DEFAULT 'lose' CHECK (goal_type IN ('lose','maintain','gain')),
   weekly_goal_kg REAL NOT NULL DEFAULT 0.5,
   step_goal INTEGER NOT NULL DEFAULT 10000,
+  pushup_goal INTEGER NOT NULL DEFAULT 50,
   bmr REAL,
   tdee REAL,
   bmi REAL,

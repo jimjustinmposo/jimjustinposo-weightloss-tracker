@@ -120,16 +120,20 @@ export function renderProfilePage(root) {
                 <input name="step_goal" type="number" step="500" min="1000" max="100000" value="${esc(p.step_goal ?? 10000)}" /></div>
             </div>
             <div class="form-row">
+              <div class="field"><label>Pushup goal / day</label>
+                <input name="pushup_goal" type="number" step="5" min="1" max="100000" value="${esc(p.pushup_goal ?? 50)}" /></div>
               <div class="field"><label>Goal</label>
                 <select name="goal_type">
                   <option value="lose" ${(p.goal_type ?? 'lose') === 'lose' ? 'selected' : ''}>Lose weight</option>
                   <option value="maintain" ${p.goal_type === 'maintain' ? 'selected' : ''}>Maintain weight</option>
                   <option value="gain" ${p.goal_type === 'gain' ? 'selected' : ''}>Gain weight</option>
                 </select></div>
-              <div class="field"><label id="weekly-label">Target loss per week (kg)</label>
-                <input name="weekly_goal_kg" type="number" step="0.1" min="0.1" max="1.5" value="${esc(p.weekly_goal_kg ?? 0.5)}" />
-                <p class="form-hint">Safe range: 0.1 – 1.5 kg/week.</p></div>
             </div>
+             <div class="form-row">
+               <div class="field"><label id="weekly-label">Target loss per week (kg)</label>
+                 <input name="weekly_goal_kg" type="number" step="0.1" min="0.1" max="1.5" value="${esc(p.weekly_goal_kg ?? 0.5)}" />
+                 <p class="form-hint">Safe range: 0.1 – 1.5 kg/week.</p></div>
+             </div>
             <button class="btn block accent" type="submit">${icons.check} ${onboarding ? 'Calculate My Targets & Start' : 'Save Profile'}</button>
           </form>
         </div>
@@ -206,6 +210,7 @@ export function renderProfilePage(root) {
         goal_type: f.get('goal_type'),
         weekly_goal_kg: Number(f.get('weekly_goal_kg')) || 0,
         step_goal: Number(f.get('step_goal')),
+        pushup_goal: Number(f.get('pushup_goal')),
         diet_type: qs('#diet-select', root).value,
         today: todayStr(),
       });
