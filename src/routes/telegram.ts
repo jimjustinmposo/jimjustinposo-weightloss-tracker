@@ -485,57 +485,79 @@ type CatalogRow = {
 
 /** Prefer an exact name match; fall back to substring search, token matching, or major keyword search. Always user-scoped. */
 async function fetchCandidates(db: D1Database, userId: number, query: string): Promise<CatalogRow[]> {
-  const qClean = query.trim().toLowerCase();
-  if (!qClean) return [];
+  try {
+    const qClean = query.trim().toLowerCase();
+    if (!qClean) return [];
 
-  // 1. Exact match (case-insensitive)
-  const exact = (
-    await db.prepare('SELECT * FROM foods WHERE user_id = ?1 AND LOWER(name) = ?2 LIMIT 8')
-      .bind(userId, qClean)
-      .all<CatalogRow>()
-  ).results;
-  if (exact.length) return exact;
+    // Strip leading/trailing quantities and units from food search query (e.g. "100g raw egg" -> "raw egg")
+    const cleanSearch = qClean
+      .replace(/^[0-9]+(?:\.[0-9]+)?\s*(?:kg|kgs|kilo|kilos|kilograms?|gr|gm|g|grams?|ml|oz|ounces?|lb|lbs|pounds?|piece|pieces|pc|pcs|eggs?|serving|servings|portions?)\b\.?\s*/i, '')
+      .replace(/\s+[0-9]+(?:\.[0-9]+)?\s*(?:kg|kgs|kilo|kilos|kilograms?|gr|gm|g|grams?|ml|oz|ounces?|lb|lbs|pounds?|piece|pieces|pc|pcs|eggs?|serving|servings|portions?)\b\.?$/i, '')
+      .trim() || qClean;
 
-  // 2. Full substring match
-  const sub = (
-    await db.prepare(
-      `SELECT * FROM foods WHERE user_id = ?1 AND LOWER(name) LIKE '%' || ?2 || '%' ESCAPE '\\' ORDER BY LENGTH(name) ASC LIMIT 8`
-    )
-      .bind(userId, escapeLike(qClean))
-      .all<CatalogRow>()
-  ).results;
-  if (sub.length) return sub;
-
-  // 3. Multi-token / word-order independent match (all words must appear in food name)
-  const STOP_WORDS = new Set(['a', 'an', 'the', 'of', 'for', 'and', 'with', 'in', 'on', 'at']);
-  const words = qClean
-    .split(/[\s,._\-\/]+/)
-    .map((w) => w.trim())
-    .filter((w) => w.length > 1 && !STOP_WORDS.has(w));
-
-  if (words.length > 1) {
-    const whereClauses = words.map((_, i) => `LOWER(name) LIKE '%' || ?${i + 2} || '%' ESCAPE '\\'`).join(' AND ');
-    const binds: Array<string | number> = [userId, ...words.map((w) => escapeLike(w))];
-    const tokenMatch = (
-      await db.prepare(`SELECT * FROM foods WHERE user_id = ?1 AND ${whereClauses} ORDER BY LENGTH(name) ASC LIMIT 8`)
-        .bind(...binds)
+    // 1. Exact match (case-insensitive)
+    const exact = (
+      await db.prepare('SELECT * FROM foods WHERE user_id = ?1 AND LOWER(name) = ?2 LIMIT 8')
+        .bind(userId, cleanSearch)
         .all<CatalogRow>()
     ).results;
-    if (tokenMatch.length) return tokenMatch;
-  }
+    if (exact && exact.length) return exact;
 
-  // 4. Major keyword fallback (resilient to typos in one of multiple words e.g. "chicken breask")
-  const PREP_WORDS = new Set(['raw', 'cooked', 'grilled', 'boiled', 'fried', 'baked', 'roasted', 'steamed']);
-  const majorWords = words.filter((w) => !PREP_WORDS.has(w) && w.length >= 3);
-  for (const word of majorWords) {
-    const wordMatch = (
+    // 2. Full substring match
+    const sub = (
       await db.prepare(
         `SELECT * FROM foods WHERE user_id = ?1 AND LOWER(name) LIKE '%' || ?2 || '%' ESCAPE '\\' ORDER BY LENGTH(name) ASC LIMIT 8`
       )
-        .bind(userId, escapeLike(word))
+        .bind(userId, escapeLike(cleanSearch))
         .all<CatalogRow>()
     ).results;
-    if (wordMatch.length) return wordMatch;
+    if (sub && sub.length) return sub;
+
+    // 3. Multi-token / word-order independent match
+    const STOP_WORDS = new Set(['a', 'an', 'the', 'of', 'for', 'and', 'with', 'in', 'on', 'at', 'g', 'kg', 'oz', 'lb', 'ml', 'piece', 'pcs', 'serving', 'servings']);
+    const words = cleanSearch
+      .split(/[\s,._\-\/]+/)
+      .map((w) => w.trim())
+      .filter((w) => w.length > 1 && !STOP_WORDS.has(w) && !/^\d+$/.test(w));
+
+    if (words.length > 1) {
+      const whereClauses = words.map((_, i) => `LOWER(name) LIKE '%' || ?${i + 2} || '%' ESCAPE '\\'`).join(' AND ');
+      const binds: Array<string | number> = [userId, ...words.map((w) => escapeLike(w))];
+      const tokenMatch = (
+        await db.prepare(`SELECT * FROM foods WHERE user_id = ?1 AND ${whereClauses} ORDER BY LENGTH(name) ASC LIMIT 8`)
+          .bind(...binds)
+          .all<CatalogRow>()
+      ).results;
+      if (tokenMatch && tokenMatch.length) return tokenMatch;
+    }
+
+    // 4. Major keyword fallback (resilient to typos in one of multiple words e.g. "chicken breask")
+    const PREP_WORDS = new Set(['raw', 'cooked', 'grilled', 'boiled', 'fried', 'baked', 'roasted', 'steamed']);
+    const majorWords = words.filter((w) => !PREP_WORDS.has(w) && w.length >= 3);
+    for (const word of majorWords) {
+      const wordMatch = (
+        await db.prepare(
+          `SELECT * FROM foods WHERE user_id = ?1 AND LOWER(name) LIKE '%' || ?2 || '%' ESCAPE '\\' ORDER BY LENGTH(name) ASC LIMIT 8`
+        )
+          .bind(userId, escapeLike(word))
+          .all<CatalogRow>()
+      ).results;
+      if (wordMatch && wordMatch.length) return wordMatch;
+    }
+
+    // 5. Fallback: try original query substring if cleanSearch differed
+    if (cleanSearch !== qClean) {
+      const origSub = (
+        await db.prepare(
+          `SELECT * FROM foods WHERE user_id = ?1 AND LOWER(name) LIKE '%' || ?2 || '%' ESCAPE '\\' ORDER BY LENGTH(name) ASC LIMIT 8`
+        )
+          .bind(userId, escapeLike(qClean))
+          .all<CatalogRow>()
+      ).results;
+      if (origSub && origSub.length) return origSub;
+    }
+  } catch (e) {
+    console.error('[telegram] fetchCandidates error:', e);
   }
 
   return [];
