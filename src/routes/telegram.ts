@@ -651,7 +651,15 @@ async function handleMealText(
       continue;
     }
 
-    const conv = convertToGrams(it.quantity, it.unit || 'g', dec.food.serving_grams);
+    let unit = (it.unit || 'g').toLowerCase();
+    const servingGrams = (dec.food.serving_grams && dec.food.serving_grams > 0) ? dec.food.serving_grams : 50;
+    if ((unit === 'piece' || unit === 'serving' || unit === 'egg' || unit === 'eggs') && it.quantity >= 15) {
+      unit = 'g';
+    }
+    let conv = convertToGrams(it.quantity, unit, servingGrams);
+    if (!conv.ok && conv.reason === 'no_serving_size') {
+      conv = convertToGrams(it.quantity, unit, 50);
+    }
     if (!conv.ok) {
       if (conv.reason === 'no_serving_size') {
         problems.push(`• "${dec.food.name}" has no serving size set, so I can't count pieces.\n   Give a weight instead — e.g. 150g.`);
@@ -668,7 +676,7 @@ async function handleMealText(
       foodId: dec.food.id,
       foodName: dec.food.name,
       grams: conv.grams,
-      amountLabel: amountLabel(it.quantity, it.unit, conv.grams),
+      amountLabel: amountLabel(it.quantity, unit, conv.grams),
     });
   }
 
@@ -900,16 +908,22 @@ async function handleCallback(env: Env, cb: CallbackQuery): Promise<void> {
       await finish('That food no longer exists');
       return;
     }
-    const conv = convertToGrams(it.qty ?? 0, it.unit || 'g', food.serving_grams);
-    if (!conv.ok) {
-      await finish(`Please resend with a weight — e.g. 150g ${food.name}`);
-      return;
+
+    let unit = (it.unit || 'g').toLowerCase();
+    const servingGrams = (food.serving_grams && food.serving_grams > 0) ? food.serving_grams : 50;
+    if ((unit === 'piece' || unit === 'serving' || unit === 'egg' || unit === 'eggs') && (it.qty ?? 0) >= 15) {
+      unit = 'g';
     }
+    let conv = convertToGrams(it.qty ?? 0, unit, servingGrams);
+    if (!conv.ok) {
+      conv = { ok: true, grams: Math.max(1, Math.min(10000, Number(it.qty) || 100)) };
+    }
+
     it.status = 'ok';
     it.foodId = food.id;
     it.foodName = food.name;
     it.grams = conv.grams;
-    it.amountLabel = amountLabel(it.qty ?? 0, it.unit, conv.grams);
+    it.amountLabel = amountLabel(it.qty ?? 0, unit, conv.grams);
     await savePending(db, pid, data);
     await finish(`Using “${food.name}”`);
     await advancePending(env, db, pid);
