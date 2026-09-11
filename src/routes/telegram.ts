@@ -767,6 +767,10 @@ async function advancePending(env: Env, db: D1Database, pid: number): Promise<vo
     resolved.push({ name: food.name, amountLabel: it.amountLabel!, macros: scaleMacros(food, it.grams!) });
   }
   data.stage = 'ready';
+  // Persist the 'ready' state BEFORE the Telegram edit round-trip so a Confirm
+  // tap that races with this message update can never read a stale,
+  // still-'resolving' payload and appear to do nothing.
+  await savePending(db, pid, data);
   await sendOrEdit(env, db, pid, data, formatMealAnalysis(resolved, MEAL_LABELS[data.meal]), [
     [
       { text: '✅ Confirm', callback_data: `tc:${pid}` },
@@ -862,19 +866,28 @@ async function handleCallback(env: Env, cb: CallbackQuery): Promise<void> {
   }
 
   if (action === 'tc') {
-    const saved: Array<{ name: string; amountLabel: string; macros: ReturnType<typeof scaleMacros> }> = [];
+    // Validate EVERY item BEFORE inserting anything: a partially-resolved meal
+    // must never be half-saved, silently guessed, or double-saved on retry.
+    type PendingFood = NonNullable<Awaited<ReturnType<typeof getCatalogFood>>>;
+    const entries: Array<{ food: PendingFood; grams: number; amountLbl: string }> = [];
+
     for (const it of data.items) {
       let foodId = it.foodId;
       let grams = it.grams;
-      let amountLbl = it.amountLabel;
+      let amountLbl = it.amountLabel ?? '';
 
-      if (!foodId && it.options && it.options.length > 0) {
-        foodId = it.options[0].id;
+      if (!foodId) {
+        // The item was never resolved (e.g. a race) — never save a guess.
+        await finish('One item still needs a choice — pick it below');
+        await advancePending(env, db, pid);
+        return;
       }
-      if (!foodId) continue;
 
       const food = await getCatalogFood(db, userId, foodId);
-      if (!food) continue;
+      if (!food) {
+        await finish('One item is no longer in your catalog — please send it again');
+        return;
+      }
 
       if (!grams || grams <= 0) {
         let unit = (it.unit || 'g').toLowerCase();
@@ -887,19 +900,24 @@ async function handleCallback(env: Env, cb: CallbackQuery): Promise<void> {
         amountLbl = amountLabel(it.qty ?? 0, unit, grams);
       }
 
-      const macros = scaleMacros(food, grams);
+      entries.push({ food, grams, amountLbl });
+    }
+
+    const saved: Array<{ name: string; amountLabel: string; macros: ReturnType<typeof scaleMacros> }> = [];
+    for (const e of entries) {
+      const macros = scaleMacros(e.food, e.grams);
       await insertFoodLog(db, userId, {
         date: data.date,
         meal: data.meal,
-        grams: grams,
-        foodId: food.id,
-        name: food.name,
+        grams: e.grams,
+        foodId: e.food.id,
+        name: e.food.name,
         calories: macros.calories,
         protein: macros.protein,
         carbs: macros.carbs,
         fat: macros.fat,
       });
-      saved.push({ name: food.name, amountLabel: amountLbl || `${grams} g`, macros });
+      saved.push({ name: e.food.name, amountLabel: e.amountLbl || `${e.grams} g`, macros });
     }
 
     if (!saved.length) {
@@ -946,6 +964,10 @@ async function handleCallback(env: Env, cb: CallbackQuery): Promise<void> {
     it.foodName = food.name;
     it.grams = conv.grams;
     it.amountLabel = amountLabel(it.qty ?? 0, unit, conv.grams);
+    // If this was the last unresolved item, mark the meal 'ready' in the SAME
+    // save as the choice — otherwise a Confirm tap racing with the follow-up
+    // message edit could still see a 'resolving' payload.
+    if (data.items.every((i) => i.status === 'ok')) data.stage = 'ready';
     await savePending(db, pid, data);
     await finish(`Using “${food.name}”`);
     await advancePending(env, db, pid);
