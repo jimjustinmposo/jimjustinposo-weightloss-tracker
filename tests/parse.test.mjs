@@ -189,3 +189,14 @@ test('localExtract splits on commas / and / & / newlines', () => {
     ]
   );
 });
+
+test('localExtract parses multi-item text with leading and trailing unit phrasing', () => {
+  const { items } = localExtract('100g raw egg and chicken breask 100g');
+  assert.deepEqual(
+    items.map((i) => [i.food, i.quantity, i.unit]),
+    [
+      ['raw egg', 100, 'g'],
+      ['chicken breask', 100, 'g'],
+    ]
+  );
+});
