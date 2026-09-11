@@ -785,14 +785,14 @@ async function sendOrEdit(
 ): Promise<void> {
   if (data.message_id) {
     await editMessage(env, data.chat_id, data.message_id, text, keyboard);
-    return;
+  } else {
+    const sent = (await sendMessage(env, data.chat_id, text, keyboard)) as { result?: { message_id?: number } } | null;
+    const mid = Number(sent?.result?.message_id);
+    if (Number.isFinite(mid)) {
+      data.message_id = mid;
+    }
   }
-  const sent = (await sendMessage(env, data.chat_id, text, keyboard)) as { result?: { message_id?: number } } | null;
-  const mid = Number(sent?.result?.message_id);
-  if (Number.isFinite(mid)) {
-    data.message_id = mid;
-    await savePending(db, pid, data);
-  }
+  await savePending(db, pid, data);
 }
 
 /* ------------------------------------------------------------------ */
@@ -862,7 +862,8 @@ async function handleCallback(env: Env, cb: CallbackQuery): Promise<void> {
   }
 
   if (action === 'tc') {
-    if (data.stage !== 'ready') {
+    const allResolved = data.items.length > 0 && data.items.every((i) => i.status === 'ok');
+    if (data.stage !== 'ready' && !allResolved) {
       await finish('Still resolving foods…');
       return;
     }
