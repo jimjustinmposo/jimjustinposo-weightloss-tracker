@@ -862,21 +862,36 @@ async function handleCallback(env: Env, cb: CallbackQuery): Promise<void> {
   }
 
   if (action === 'tc') {
-    const allResolved = data.items.length > 0 && data.items.every((i) => i.status === 'ok');
-    if (data.stage !== 'ready' && !allResolved) {
-      await finish('Still resolving foods…');
-      return;
-    }
     const saved: Array<{ name: string; amountLabel: string; macros: ReturnType<typeof scaleMacros> }> = [];
     for (const it of data.items) {
-      // Re-read the catalog at confirm time — values always come from YOUR database.
-      const food = await getCatalogFood(db, userId, it.foodId!);
+      let foodId = it.foodId;
+      let grams = it.grams;
+      let amountLbl = it.amountLabel;
+
+      if (!foodId && it.options && it.options.length > 0) {
+        foodId = it.options[0].id;
+      }
+      if (!foodId) continue;
+
+      const food = await getCatalogFood(db, userId, foodId);
       if (!food) continue;
-      const macros = scaleMacros(food, it.grams!);
+
+      if (!grams || grams <= 0) {
+        let unit = (it.unit || 'g').toLowerCase();
+        const servingGrams = (food.serving_grams && food.serving_grams > 0) ? food.serving_grams : 50;
+        if ((unit === 'piece' || unit === 'serving' || unit === 'egg' || unit === 'eggs') && (it.qty ?? 0) >= 15) {
+          unit = 'g';
+        }
+        const conv = convertToGrams(it.qty ?? 0, unit, servingGrams);
+        grams = conv.ok ? conv.grams : (Number(it.qty) || 100);
+        amountLbl = amountLabel(it.qty ?? 0, unit, grams);
+      }
+
+      const macros = scaleMacros(food, grams);
       await insertFoodLog(db, userId, {
         date: data.date,
         meal: data.meal,
-        grams: it.grams!,
+        grams: grams,
         foodId: food.id,
         name: food.name,
         calories: macros.calories,
@@ -884,8 +899,14 @@ async function handleCallback(env: Env, cb: CallbackQuery): Promise<void> {
         carbs: macros.carbs,
         fat: macros.fat,
       });
-      saved.push({ name: food.name, amountLabel: it.amountLabel!, macros });
+      saved.push({ name: food.name, amountLabel: amountLbl || `${grams} g`, macros });
     }
+
+    if (!saved.length) {
+      await finish('No items found in catalog');
+      return;
+    }
+
     await db.prepare('DELETE FROM telegram_pending_meals WHERE id = ?1').bind(pid).run();
     const totals = sumNutrition(saved.map((s) => s.macros));
     await finish(`Saved ${saved.length} item${saved.length === 1 ? '' : 's'}!`);
