@@ -29,12 +29,18 @@ export function start() {
 }
 
 /** Kick a sync run (no-op when offline or signed out). */
-export function trigger(reason) {
+export async function trigger(reason) {
   // Check navigator.onLine (real connectivity), NOT the in-memory isOnline()
   // flag — that flag is updated by a SEPARATE 'online' listener that fires
   // AFTER this one, so it would always be stale here and sync would never start.
   if (typeof navigator !== 'undefined' && !navigator.onLine) return;
-  if (offline.getUser() == null) return;
+  const uid = offline.getUser();
+  if (uid == null) return;
+  // Background triggers (periodic 60s timer, tab focus, reconnect) only have
+  // work to do when the user queued offline changes. Without pending ops there
+  // is nothing to push — skip the re-fetch + page re-render entirely. Only
+  // app start / login still run a full seed so the offline cache is primed.
+  if (reason !== 'boot' && reason !== 'login' && !(await offline.hasPending(uid))) return;
   if (running) { queued = true; return; }
   running = true;
   doSync(reason)
