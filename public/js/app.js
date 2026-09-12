@@ -208,9 +208,16 @@ async function boot() {
   await offline.init();
   sync.start();
 
-  // After a background sync finishes, refresh the visible view with fresh data.
+  // After a background sync finishes, refresh the visible view with fresh data —
+  // but never yank the page out from under the user while they're mid-action
+  // (typing in a form or a modal is open). The next sync picks it up later.
   offline.addDataChangedListener(() => {
-    if (App.user) route();
+    if (!App.user) return;
+    const el = document.activeElement;
+    const editing = el && el.matches('input, textarea, select, [contenteditable]');
+    const modalOpen = !!document.querySelector('.modal-overlay');
+    if (editing || modalOpen) return;
+    route();
   });
 
   try {
