@@ -169,13 +169,13 @@ export function pushupsModal(onSaved, entry = null) {
         <div class="form-row">
           <div class="field"><label>Date</label>
             <input type="date" name="date" value="${esc(entry?.log_date ?? todayStr())}" max="${todayStr()}" required /></div>
-          <div class="field"><label>Pushups</label>
+          <div class="field"><label>Pushups to add</label>
             <input type="number" name="pushups" step="1" min="0" max="50000" placeholder="e.g. 50"
               value="${entry?.pushups != null ? Number(entry.pushups) : ''}" required /></div>
         </div>
-        <p class="form-hint">Calories burned are estimated from your body weight. Daily goal: ${fmt(goal)} pushups.</p>
+        <p class="form-hint">Add pushups to today's count. If you already logged pushups for this date, they will be added to the existing total. Daily goal: ${fmt(goal)} pushups.</p>
         <br/>
-        <button class="btn block accent" type="submit">${icons.pushups} ${editing ? 'Update Pushups' : 'Save Pushups'}</button>
+        <button class="btn block accent" type="submit">${icons.pushups} ${editing ? 'Update Pushups' : 'Add Pushups'}</button>
       </form>`,
   });
   const form = qs('#p-form', overlay);
@@ -196,7 +196,7 @@ export function pushupsModal(onSaved, entry = null) {
       }
       await api.post('/api/pushups', { date, pushups });
       close();
-      toast(editing ? 'Pushups updated' : 'Pushups saved');
+      toast(editing ? 'Pushups updated' : 'Pushups added');
       if (onSaved) {
         try {
           await onSaved();

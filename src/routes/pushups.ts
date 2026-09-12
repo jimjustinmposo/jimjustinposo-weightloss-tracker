@@ -33,18 +33,28 @@ export async function applyPushupLog(
   }
 
   const weight = await getProfileWeight(db, userId);
+  
+  // First, check if there's an existing entry for this date
+  const existing = await db.prepare('SELECT pushups, calories_burned FROM pushup_logs WHERE user_id = ?1 AND log_date = ?2')
+    .bind(userId, date)
+    .first<{ pushups: number; calories_burned: number }>();
+  
+  // Calculate new totals (accumulate pushups)
+  const newTotalPushups = (existing?.pushups || 0) + p;
+  
+  // Recalculate calories burned based on total pushups and body weight
   // Rough estimate: ~0.0008 kcal per pushup per kg of body weight.
   const burned =
-    p === 0 || weight == null
+    newTotalPushups === 0 || weight == null
       ? 0
-      : Math.round(p * weight * 0.0008 * 10) / 10;
+      : Math.round(newTotalPushups * weight * 0.0008 * 10) / 10;
 
   await db.prepare(
     `INSERT INTO pushup_logs (user_id, log_date, pushups, calories_burned) VALUES (?1, ?2, ?3, ?4)
      ON CONFLICT(user_id, log_date) DO UPDATE SET
        pushups=excluded.pushups, calories_burned=excluded.calories_burned, updated_at=datetime('now')`
   )
-    .bind(userId, date, p, burned)
+    .bind(userId, date, newTotalPushups, burned)
     .run();
 
   const log = await db.prepare('SELECT * FROM pushup_logs WHERE user_id = ?1 AND log_date = ?2')
