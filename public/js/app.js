@@ -29,7 +29,7 @@ function buildShell() {
   document.body.classList.add('app-shell');
   shell().innerHTML = `
     <header class="topbar">
-      <div class="brand">${icons.heart}<span>Develop by Jim Justin Poso<small>Weightloss Tracker</small></span></div>
+      <div class="brand">${icons.heart}<span class="brand-name"><small>Developed by</small><b>Jim Justin Poso</b><small>Weightloss Tracker</small></span></div>
       <nav class="topnav">
         ${NAV.map((n) => `<a href="${n.hash}" data-nav="${n.hash}">${n.label}</a>`).join('')}
       </nav>
