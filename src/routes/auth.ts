@@ -10,7 +10,7 @@ const app = new Hono<{ Bindings: Env; Variables: AppVars }>();
 
 const ADMIN_EMAIL = 'jimjustinmposo@gmail.com';
 const CONTACT_ERROR =
-  'Incorrect security password. Contact Jim Justin Poso on WhatsApp: 0501905318 or DM him on Facebook.';
+  'Account creation failed.\n\nPlease contact Jim Justin M. Poso on WhatsApp at 050 190 5318 or send him a private message on Facebook for assistance.';
 
 async function mePayload(c: { env: Env; get: (k: 'userId') => number }) {
   const userId = c.get('userId');
