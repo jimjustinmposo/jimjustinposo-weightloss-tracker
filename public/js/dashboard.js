@@ -73,16 +73,36 @@ export function weightModal(onSaved) {
         <button class="btn block accent" type="submit">${icons.scale} Save Weight</button>
       </form>`,
   });
-  qs('#w-form', overlay).addEventListener('submit', async (e) => {
+  const form = qs('#w-form', overlay);
+  if (!form) {
+    console.error('weightModal: form #w-form not found in overlay');
+    return;
+  }
+  form.addEventListener('submit', async (e) => {
     e.preventDefault();
+    e.stopPropagation();
     const f = e.target;
     try {
-      await api.post('/api/weights', { date: f.date.value, weight: Number(f.weight.value) });
+      const date = f.date.value;
+      const weight = Number(f.weight.value);
+      if (!date || !Number.isFinite(weight)) {
+        toast('Please enter a valid date and weight.', 'error');
+        return;
+      }
+      await api.post('/api/weights', { date, weight });
       close();
       toast('Weight saved');
-      onSaved?.();
+      if (onSaved) {
+        try {
+          await onSaved();
+        } catch (err) {
+          console.error('weightModal: onSaved callback failed:', err);
+          toast('Saved, but failed to refresh the page. Please try again.', 'error');
+        }
+      }
     } catch (err) {
-      toast(err.message, 'error');
+      console.error('weightModal: API call failed:', err);
+      toast(err.message || 'Failed to save weight.', 'error');
     }
   });
 }
@@ -106,16 +126,36 @@ export function stepsModal(onSaved, entry = null) {
         <button class="btn block accent" type="submit">${icons.steps} ${editing ? 'Update Steps' : 'Save Steps'}</button>
       </form>`,
   });
-  qs('#s-form', overlay).addEventListener('submit', async (e) => {
+  const form = qs('#s-form', overlay);
+  if (!form) {
+    console.error('stepsModal: form #s-form not found in overlay');
+    return;
+  }
+  form.addEventListener('submit', async (e) => {
     e.preventDefault();
+    e.stopPropagation();
     const f = e.target;
     try {
-      await api.post('/api/steps', { date: f.date.value, steps: Number(f.steps.value) });
+      const date = f.date.value;
+      const steps = Number(f.steps.value);
+      if (!date || !Number.isFinite(steps)) {
+        toast('Please enter a valid date and step count.', 'error');
+        return;
+      }
+      await api.post('/api/steps', { date, steps });
       close();
       toast(editing ? 'Steps updated' : 'Steps saved');
-      onSaved?.();
+      if (onSaved) {
+        try {
+          await onSaved();
+        } catch (err) {
+          console.error('stepsModal: onSaved callback failed:', err);
+          toast('Saved, but failed to refresh the page. Please try again.', 'error');
+        }
+      }
     } catch (err) {
-      toast(err.message, 'error');
+      console.error('stepsModal: API call failed:', err);
+      toast(err.message || 'Failed to save steps.', 'error');
     }
   });
 }
@@ -138,16 +178,36 @@ export function pushupsModal(onSaved, entry = null) {
         <button class="btn block accent" type="submit">${icons.pushups} ${editing ? 'Update Pushups' : 'Save Pushups'}</button>
       </form>`,
   });
-  qs('#p-form', overlay).addEventListener('submit', async (e) => {
+  const form = qs('#p-form', overlay);
+  if (!form) {
+    console.error('pushupsModal: form #p-form not found in overlay');
+    return;
+  }
+  form.addEventListener('submit', async (e) => {
     e.preventDefault();
+    e.stopPropagation();
     const f = e.target;
     try {
-      await api.post('/api/pushups', { date: f.date.value, pushups: Number(f.pushups.value) });
+      const date = f.date.value;
+      const pushups = Number(f.pushups.value);
+      if (!date || !Number.isFinite(pushups)) {
+        toast('Please enter a valid date and pushup count.', 'error');
+        return;
+      }
+      await api.post('/api/pushups', { date, pushups });
       close();
       toast(editing ? 'Pushups updated' : 'Pushups saved');
-      onSaved?.();
+      if (onSaved) {
+        try {
+          await onSaved();
+        } catch (err) {
+          console.error('pushupsModal: onSaved callback failed:', err);
+          toast('Saved, but failed to refresh the page. Please try again.', 'error');
+        }
+      }
     } catch (err) {
-      toast(err.message, 'error');
+      console.error('pushupsModal: API call failed:', err);
+      toast(err.message || 'Failed to save pushups.', 'error');
     }
   });
 }
