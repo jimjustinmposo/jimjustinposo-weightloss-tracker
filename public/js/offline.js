@@ -13,8 +13,8 @@
 import * as math from './offline-math.js';
 
 const DB_NAME = 'weightloss-tracker-od';
-const DB_VERSION = 1;
-const STORES = ['kv', 'users', 'profiles', 'foods', 'logs', 'weights', 'steps', 'ops'];
+const DB_VERSION = 2; // v2: added the 'pushups' store
+const STORES = ['kv', 'users', 'profiles', 'foods', 'logs', 'weights', 'steps', 'pushups', 'ops'];
 
 /* ---------------- in-memory state ---------------- */
 let dbPromise = null;
@@ -158,6 +158,7 @@ const foodKey = (uid, id) => `f${uid}:${id}`;
 const logKey = (uid, id) => `l${uid}:${id}`;
 const weightKey = (uid, id) => `w${uid}:${id}`;
 const stepKey = (uid, date) => `s${uid}|${date}`;
+const pushupKey = (uid, date) => `p${uid}|${date}`;
 
 const isoNow = () => {
   const d = new Date();
@@ -355,6 +356,7 @@ const foodsForUser = async (uid) => (await storeGetAll('foods')).filter((r) => r
 const logsForUser = async (uid) => (await storeGetAll('logs')).filter((r) => r.user_id === uid);
 const weightsForUser = async (uid) => (await storeGetAll('weights')).filter((r) => r.user_id === uid);
 const stepsForUser = async (uid) => (await storeGetAll('steps')).filter((r) => r.user_id === uid);
+const pushupsForUser = async (uid) => (await storeGetAll('pushups')).filter((r) => r.user_id === uid);
 
 const findFoodById = async (uid, id) => {
   const rec = await storeGet('foods', foodKey(uid, id));
@@ -397,6 +399,23 @@ function normStep(r, uid) {
   rec.k = stepKey(uid, String(rec.log_date));
   return rec;
 }
+function normPushup(r, uid) {
+  const rec = { ...r, user_id: r.user_id ?? uid };
+  rec.k = pushupKey(uid, String(rec.log_date));
+  return rec;
+}
+
+/** Per-store key prefix so replaceUserRows() can wipe one user's rows safely. */
+const uidPrefixFor = (store, uid) => {
+  switch (store) {
+    case 'foods': return foodKey(uid, '');
+    case 'logs': return logKey(uid, '');
+    case 'weights': return weightKey(uid, '');
+    case 'steps': return stepKey(uid, '');
+    case 'pushups': return pushupKey(uid, '');
+    default: return '';
+  }
+};
 
 async function replaceUserRows(store, uid, rows) {
   if (store === 'users' || store === 'profiles') {
@@ -432,6 +451,16 @@ async function upsertSteps(uid, rows) {
     recs.push(rec);
   }
   await storeBulkPut('steps', recs);
+}
+async function upsertPushups(uid, rows) {
+  const recs = [];
+  for (const r of rows || []) {
+    const rec = normPushup(r, uid);
+    rec.user_id = uid;
+    rec.k = pushupKey(uid, String(rec.log_date));
+    recs.push(rec);
+  }
+  await storeBulkPut('pushups', recs);
 }
 /* ---------------- cache reads (offline serving) ---------------- */
 function parseUrl(path) {
@@ -532,6 +561,30 @@ export async function cacheGet(path) {
       }
       return { series };
     }
+    case '/api/pushups/entries': {
+      const limit = Math.min(Math.max(Math.round(Number(params.get('limit')) || 90), 1), 365);
+      const rows = math.sortDescByDate(await pushupsForUser(uid)).slice(0, limit).map(stripRow);
+      return { entries: rows };
+    }
+    case '/api/pushups': {
+      const from = params.get('from');
+      const to = params.get('to');
+      let fromDate, toDate;
+      if (/^\d{4}-\d{2}-\d{2}$/.test(from) && /^\d{4}-\d{2}-\d{2}$/.test(to)) {
+        fromDate = from; toDate = to;
+      } else {
+        const days = Math.min(Math.max(Math.round(Number(params.get('days')) || 7), 1), 90);
+        toDate = math.toDateStr(new Date());
+        fromDate = math.shiftDate(toDate, -(days - 1));
+      }
+      const byDate = new Map((await pushupsForUser(uid)).map((s) => [String(s.log_date), s]));
+      const series = [];
+      for (let d = fromDate; d <= toDate; d = math.shiftDate(d, 1)) {
+        const r = byDate.get(d);
+        series.push({ log_date: d, pushups: r ? Number(r.pushups || 0) : 0, calories_burned: r ? Number(r.calories_burned || 0) : 0 });
+      }
+      return { series };
+    }
     default:
       if (p.startsWith('/api/')) {
         throw new Error(`This view is not available offline (${p}).`);
@@ -580,6 +633,12 @@ export async function cachePutFromGet(path, data) {
     case '/api/steps':
       await upsertSteps(uid, (data.series || []).filter((s) => Number(s.steps) > 0 || Number(s.calories_burned) > 0));
       break;
+    case '/api/pushups/entries':
+      await replaceUserRows('pushups', uid, (data.entries || []).map((r) => normPushup(r, uid)));
+      break;
+    case '/api/pushups':
+      await upsertPushups(uid, (data.series || []).filter((s) => Number(s.pushups) > 0 || Number(s.calories_burned) > 0));
+      break;
     case '/api/dashboard': {
       if (data.profile) await storePut('profiles', { ...data.profile, k: data.profile.user_id ?? uid, user_id: data.profile.user_id ?? uid });
       const date = data.date;
@@ -613,6 +672,8 @@ export async function applyServerWrite(method, path, body, data) {
         if (data.profile) await storePut('profiles', { ...data.profile, k: data.profile.user_id ?? uid });
       } else if (path === '/api/steps' && data.log) {
         await upsertSteps(uid, [data.log]);
+      } else if (path === '/api/pushups' && data.log) {
+        await upsertPushups(uid, [data.log]);
       } else if (path === '/api/foods' && data.food) {
         await deleteWhere('foods', (r) => r.user_id === uid
           && String(r.name).toLowerCase() === String(data.food.name).toLowerCase()
@@ -645,6 +706,9 @@ export async function applyServerWrite(method, path, body, data) {
       } else if (/^\/api\/steps\/\d{4}-\d{2}-\d{2}/.test(path)) {
         const date = decodeURIComponent(path.split('/').pop());
         await storeDelete('steps', stepKey(uid, date));
+      } else if (/^\/api\/pushups\/\d{4}-\d{2}-\d{2}/.test(path)) {
+        const date = decodeURIComponent(path.split('/').pop());
+        await storeDelete('pushups', pushupKey(uid, date));
       }
     }
   } catch (e) {
@@ -1007,12 +1071,61 @@ async function localStepDelete(uid, date) {
   return { ok: true };
 }
 
+/* Pushups mirror steps (user + date keyed) — but POST ACCUMULATES like the server:
+   each offline add is appended to the cached day total and queued with the
+   incremental count, so the server total ends up identical after sync. */
+async function localPushupUpsert(uid, body) {
+  const date = String(body.date || '');
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) throw new Error('A valid date (YYYY-MM-DD) is required.');
+  const pushups = Math.round(Number(body.pushups));
+  if (!Number.isFinite(pushups) || pushups < 0 || pushups > 50000) {
+    throw new Error('Pushups must be between 0 and 50,000.');
+  }
+  const profile = await storeGet('profiles', uid);
+  const weight = profile?.current_weight;
+  const existing = await storeGet('pushups', pushupKey(uid, date));
+  const total = Number(existing?.pushups || 0) + pushups;
+  const burned = total === 0 || weight == null
+    ? 0
+    : Math.round(total * Number(weight) * 0.0008 * 10) / 10;
+  const rec = {
+    ...(existing || {}),
+    k: pushupKey(uid, date),
+    user_id: uid,
+    log_date: date,
+    pushups: total,
+    calories_burned: burned,
+    updated_at: isoNow(),
+  };
+  await storePut('pushups', rec);
+  // Keep ONE op per date and accumulate the increments into it, so a single
+  // POST after reconnect reproduces the exact accumulated total on the server.
+  const op = await findPendingOpFor(uid, (o) => o.entity === 'pushup' && String(o.payload?.date) === String(date));
+  if (op) await updateOp(op.id, { payload: { date, pushups: Number(op.payload?.pushups || 0) + pushups }, retries: 0, status: 'pending', last_error: null });
+  else await enqueueOp(uid, { entity: 'pushup', method: 'POST', url: '/api/pushups', payload: { date, pushups }, refDate: date });
+  await refreshPendingCount();
+  return { log: stripRow(rec) };
+}
+
+async function localPushupDelete(uid, date) {
+  const key = pushupKey(uid, String(date));
+  const rec = await storeGet('pushups', key);
+  if (!rec) return { ok: true };
+  const op = await findPendingOpFor(uid, (o) => o.entity === 'pushup' && String(o.payload?.date) === String(date));
+  if (op) await removeOp(op.id);
+  await enqueueOp(uid, { entity: 'pushup', method: 'DELETE', url: '', refDate: String(date) });
+  await storeDelete('pushups', rec.k);
+  await refreshPendingCount();
+  return { ok: true };
+}
+
 /** Apply a write locally (cache + sync queue) and return a server-shaped response. */
 export async function applyLocalWrite(method, path, body = {}) {
   const uid = await requireUser();
   if (method === 'POST') {
     if (path === '/api/weights') return localWeightUpsert(uid, body);
     if (path === '/api/steps') return localStepUpsert(uid, body);
+    if (path === '/api/pushups') return localPushupUpsert(uid, body);
     if (path === '/api/foods') return localFoodUpsert(uid, body);
     if (path === '/api/logs') return localLogCreate(uid, body);
   } else if (method === 'PUT') {
@@ -1030,6 +1143,8 @@ export async function applyLocalWrite(method, path, body = {}) {
     if (fm) return localFoodDelete(uid, Number(fm[1]));
     const sm = /^\/api\/steps\/(\d{4}-\d{2}-\d{2})/.exec(path);
     if (sm) return localStepDelete(uid, sm[1]);
+    const pm = /^\/api\/pushups\/(\d{4}-\d{2}-\d{2})/.exec(path);
+    if (pm) return localPushupDelete(uid, pm[1]);
   }
   throw new Error(`Not supported offline: ${method} ${path}`);
 }
@@ -1089,6 +1204,8 @@ export async function ackCreate(op, data) {
       }
     } else if (entity === 'step') {
       if (data?.log) await upsertSteps(uid, [data.log]);
+    } else if (entity === 'pushup') {
+      if (data?.log) await upsertPushups(uid, [data.log]);
     } else if (entity === 'profile') {
       if (data?.profile) await storePut('profiles', { ...data.profile, k: data.profile.user_id ?? uid });
     }
@@ -1116,6 +1233,8 @@ export async function pushOp(op) {
       url = `/api/foods/${row.id}`;
     } else if (op.entity === 'step') {
       url = `/api/steps/${encodeURIComponent(op.refDate)}`;
+    } else if (op.entity === 'pushup') {
+      url = `/api/pushups/${encodeURIComponent(op.refDate)}`;
     } else if (op.entity === 'log' && !op.serverId && body?.client_id) {
       const created = await raw('/api/logs', { method: 'POST', body: JSON.stringify(body) });
       url = `/api/logs/${created?.entry?.id}`;
@@ -1138,6 +1257,7 @@ export async function seedAll(uid, { skipAuth = false } = {}) {
     '/api/weights?limit=365',
     '/api/logs/recent?limit=1000',
     '/api/steps/entries?limit=365',
+    '/api/pushups/entries?limit=365',
   ];
   for (const path of endpoints) {
     try {
