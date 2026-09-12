@@ -3,14 +3,18 @@ import { HTTPException } from 'hono/http-exception';
 import { createSession, destroySession, hashPassword, requireAuth, setSessionCookie, verifyPassword } from '../auth';
 import type { AppVars, Env } from '../types';
 
-type UserRow = { id: number; email: string; name: string | null };
+type UserRow = { id: number; email: string; name: string | null; is_admin?: number };
 type ProfileRow = Record<string, unknown>;
 
 const app = new Hono<{ Bindings: Env; Variables: AppVars }>();
 
+const ADMIN_EMAIL = 'jimjustinmposo@gmail.com';
+const CONTACT_ERROR =
+  'Incorrect security password. Contact Jim Justin Poso on WhatsApp: 0501905318 or DM him on Facebook.';
+
 async function mePayload(c: { env: Env; get: (k: 'userId') => number }) {
   const userId = c.get('userId');
-  const user = await c.env.DB.prepare('SELECT id, email, name FROM users WHERE id = ?1').bind(userId).first<UserRow>();
+  const user = await c.env.DB.prepare('SELECT id, email, name, is_admin FROM users WHERE id = ?1').bind(userId).first<UserRow>();
   const profile = await c.env.DB.prepare('SELECT * FROM profiles WHERE user_id = ?1').bind(userId).first<ProfileRow>();
   return { user, profile };
 }
@@ -19,7 +23,19 @@ app.post('/register', async (c) => {
   const body = (await c.req.json().catch(() => ({}))) as Record<string, unknown>;
   const email = String(body.email ?? '').trim().toLowerCase();
   const password = String(body.password ?? '');
+  const securityPassword = String(body.security_password ?? body.securityPassword ?? '');
   const name = String(body.name ?? '').trim().slice(0, 60) || null;
+
+  const adminRow = await c.env.DB.prepare('SELECT id, password_hash FROM users WHERE email = ?1')
+    .bind(ADMIN_EMAIL)
+    .first<{ id: number; password_hash: string }>();
+
+  // Admin signup itself is not gated; every other signup must present the admin's current password.
+  if (email !== ADMIN_EMAIL) {
+    if (!securityPassword || !adminRow || !(await verifyPassword(securityPassword, adminRow.password_hash))) {
+      throw new HTTPException(403, { message: CONTACT_ERROR });
+    }
+  }
 
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
     throw new HTTPException(400, { message: 'Please enter a valid email address.' });
@@ -29,10 +45,11 @@ app.post('/register', async (c) => {
   }
 
   const passwordHash = await hashPassword(password);
+  const isAdmin = email === ADMIN_EMAIL ? 1 : 0;
   let result: D1Result;
   try {
-    result = await c.env.DB.prepare('INSERT INTO users (email, password_hash, name) VALUES (?1, ?2, ?3)')
-      .bind(email, passwordHash, name)
+    result = await c.env.DB.prepare('INSERT INTO users (email, password_hash, name, is_admin) VALUES (?1, ?2, ?3, ?4)')
+      .bind(email, passwordHash, name, isAdmin)
       .run();
   } catch (err) {
     if (String((err as Error)?.message).toUpperCase().includes('UNIQUE')) {
@@ -44,7 +61,7 @@ app.post('/register', async (c) => {
   const userId = result.meta.last_row_id as number;
   const token = await createSession(c.env.DB, userId);
   setSessionCookie(c, token);
-  const user = await c.env.DB.prepare('SELECT id, email, name FROM users WHERE id = ?1').bind(userId).first<UserRow>();
+  const user = await c.env.DB.prepare('SELECT id, email, name, is_admin FROM users WHERE id = ?1').bind(userId).first<UserRow>();
   return c.json({ user, profile: null }, 201);
 });
 
@@ -53,7 +70,7 @@ app.post('/login', async (c) => {
   const email = String(body.email ?? '').trim().toLowerCase();
   const password = String(body.password ?? '');
 
-  const user = await c.env.DB.prepare('SELECT id, email, name, password_hash FROM users WHERE email = ?1')
+  const user = await c.env.DB.prepare('SELECT id, email, name, is_admin, password_hash FROM users WHERE email = ?1')
     .bind(email)
     .first<UserRow & { password_hash: string }>();
   if (!user || !(await verifyPassword(password, user.password_hash))) {
@@ -63,7 +80,7 @@ app.post('/login', async (c) => {
   const token = await createSession(c.env.DB, user.id);
   setSessionCookie(c, token);
   return c.json({
-    user: { id: user.id, email: user.email, name: user.name },
+    user: { id: user.id, email: user.email, name: user.name, is_admin: user.is_admin ?? 0 },
     profile: await c.env.DB.prepare('SELECT * FROM profiles WHERE user_id = ?1').bind(user.id).first<ProfileRow>(),
   });
 });
