@@ -14,9 +14,9 @@ const CONTACT_ERROR =
 
 async function mePayload(c: { env: Env; get: (k: 'userId') => number }) {
   const userId = c.get('userId');
-  const user = await c.env.DB.prepare('SELECT id, email, name, is_admin FROM users WHERE id = ?1').bind(userId).first<UserRow>();
+  const user = await c.env.DB.prepare('SELECT id, email, name FROM users WHERE id = ?1').bind(userId).first<UserRow>();
   const profile = await c.env.DB.prepare('SELECT * FROM profiles WHERE user_id = ?1').bind(userId).first<ProfileRow>();
-  return { user, profile };
+  return { user: user ? { ...user, is_admin: user.email.toLowerCase() === ADMIN_EMAIL ? 1 : 0 } : user, profile };
 }
 
 app.post('/register', async (c) => {
@@ -45,11 +45,10 @@ app.post('/register', async (c) => {
   }
 
   const passwordHash = await hashPassword(password);
-  const isAdmin = email === ADMIN_EMAIL ? 1 : 0;
   let result: D1Result;
   try {
-    result = await c.env.DB.prepare('INSERT INTO users (email, password_hash, name, is_admin) VALUES (?1, ?2, ?3, ?4)')
-      .bind(email, passwordHash, name, isAdmin)
+    result = await c.env.DB.prepare('INSERT INTO users (email, password_hash, name) VALUES (?1, ?2, ?3)')
+      .bind(email, passwordHash, name)
       .run();
   } catch (err) {
     if (String((err as Error)?.message).toUpperCase().includes('UNIQUE')) {
@@ -61,8 +60,8 @@ app.post('/register', async (c) => {
   const userId = result.meta.last_row_id as number;
   const token = await createSession(c.env.DB, userId);
   setSessionCookie(c, token);
-  const user = await c.env.DB.prepare('SELECT id, email, name, is_admin FROM users WHERE id = ?1').bind(userId).first<UserRow>();
-  return c.json({ user, profile: null }, 201);
+  const user = await c.env.DB.prepare('SELECT id, email, name FROM users WHERE id = ?1').bind(userId).first<UserRow>();
+  return c.json({ user: user ? { ...user, is_admin: user.email.toLowerCase() === ADMIN_EMAIL ? 1 : 0 } : user, profile: null }, 201);
 });
 
 app.post('/login', async (c) => {
@@ -70,7 +69,7 @@ app.post('/login', async (c) => {
   const email = String(body.email ?? '').trim().toLowerCase();
   const password = String(body.password ?? '');
 
-  const user = await c.env.DB.prepare('SELECT id, email, name, is_admin, password_hash FROM users WHERE email = ?1')
+  const user = await c.env.DB.prepare('SELECT id, email, name, password_hash FROM users WHERE email = ?1')
     .bind(email)
     .first<UserRow & { password_hash: string }>();
   if (!user || !(await verifyPassword(password, user.password_hash))) {
@@ -80,7 +79,7 @@ app.post('/login', async (c) => {
   const token = await createSession(c.env.DB, user.id);
   setSessionCookie(c, token);
   return c.json({
-    user: { id: user.id, email: user.email, name: user.name, is_admin: user.is_admin ?? 0 },
+    user: { id: user.id, email: user.email, name: user.name, is_admin: user.email.toLowerCase() === ADMIN_EMAIL ? 1 : 0 },
     profile: await c.env.DB.prepare('SELECT * FROM profiles WHERE user_id = ?1').bind(user.id).first<ProfileRow>(),
   });
 });
