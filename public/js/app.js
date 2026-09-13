@@ -130,8 +130,9 @@ function renderRegister() {
           <input type="email" name="email" placeholder="you@example.com" autocomplete="email" required /></div>
         <div class="field"><label>Password (min 6 chars)</label>
           <input type="password" name="password" placeholder="••••••••" autocomplete="new-password" minlength="6" required /></div>
-        <div class="field"><label>Security password</label>
-          <input type="password" name="security_password" placeholder="Ask admin for code" autocomplete="off" required /></div>
+        <div class="field"><label>Admin password</label>
+          <input type="password" name="security_password" placeholder="Admin password" autocomplete="off" required />
+          <p class="form-hint">Enter the Admin password or contact Jim Justin Poso via WhatsApp ( +971501905318 ) or Facebook.</p></div>
         <button class="btn block accent" type="submit">Create Account</button>
       </form>
       <p class="auth-alt">Already have an account? <a href="#/login">Sign in</a></p>
