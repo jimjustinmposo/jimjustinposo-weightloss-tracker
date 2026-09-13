@@ -64,6 +64,20 @@ app.post('/register', async (c) => {
   return c.json({ user: user ? { ...user, is_admin: user.email.toLowerCase() === ADMIN_EMAIL ? 1 : 0 } : user, profile: null }, 201);
 });
 
+app.post('/verify-admin', async (c) => {
+  const body = (await c.req.json().catch(() => ({}))) as Record<string, unknown>;
+  const password = String(body.password ?? '');
+  const adminRow = await c.env.DB.prepare('SELECT id, password_hash FROM users WHERE email = ?1')
+    .bind(ADMIN_EMAIL)
+    .first<{ id: number; password_hash: string }>();
+  if (!password || !adminRow || !(await verifyPassword(password, adminRow.password_hash))) {
+    throw new HTTPException(403, {
+      message: 'Incorrect admin password. Enter the Admin password or contact Jim Justin Poso via WhatsApp ( +971501905318 ) or Facebook.',
+    });
+  }
+  return c.json({ ok: true });
+});
+
 app.post('/login', async (c) => {
   const body = (await c.req.json().catch(() => ({}))) as Record<string, unknown>;
   const email = String(body.email ?? '').trim().toLowerCase();

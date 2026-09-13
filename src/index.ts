@@ -24,7 +24,7 @@ app.onError((err, c) => {
 app.get('/api/health', (c) => c.json({ ok: true, service: 'weightloss-tracker' }));
 
 // Session guard for everything under /api except the public endpoints below.
-const PUBLIC_PATHS = new Set(['/api/health', '/api/auth/register', '/api/auth/login', '/api/telegram/webhook']);
+const PUBLIC_PATHS = new Set(['/api/health', '/api/auth/register', '/api/auth/login', '/api/auth/verify-admin', '/api/telegram/webhook']);
 app.use('/api/*', async (c, next) => {
   if (PUBLIC_PATHS.has(c.req.path)) return next();
   return requireAuth(c, next);

@@ -122,6 +122,34 @@ function renderRegister() {
   view().innerHTML = `
     <div class="auth-wrap"><div class="auth-card"><div class="card">
       ${brandHtml('Create your account', 'Start tracking weight, food & steps today')}
+      <form id="admin-gate" novalidate>
+        <div class="form-error" id="err"></div>
+        <div class="field"><label>Admin password</label>
+          <input type="password" name="admin_password" placeholder="Admin password" autocomplete="off" required /></div>
+        <p class="form-hint">Enter the Admin password or contact Jim Justin Poso via WhatsApp ( +971501905318 ) or Facebook.</p>
+        <button class="btn block accent" type="submit">Continue</button>
+      </form>
+      <p class="auth-alt">Already have an account? <a href="#/login">Sign in</a></p>
+    </div></div></div>`;
+  qs('#admin-gate').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const f = e.target;
+    const errEl = qs('#err');
+    errEl.classList.remove('show');
+    try {
+      await api.post('/api/auth/verify-admin', { password: f.admin_password.value });
+      renderRegisterForm(f.admin_password.value);
+    } catch (err) {
+      errEl.textContent = err.message;
+      errEl.classList.add('show');
+    }
+  });
+}
+
+function renderRegisterForm(adminPassword) {
+  view().innerHTML = `
+    <div class="auth-wrap"><div class="auth-card"><div class="card">
+      ${brandHtml('Create your account', 'Start tracking weight, food & steps today')}
       <form id="reg-form" novalidate>
         <div class="form-error" id="err"></div>
         <div class="field"><label>Name</label>
@@ -130,14 +158,17 @@ function renderRegister() {
           <input type="email" name="email" placeholder="you@example.com" autocomplete="email" required /></div>
         <div class="field"><label>Password (min 6 chars)</label>
           <input type="password" name="password" placeholder="••••••••" autocomplete="new-password" minlength="6" required /></div>
-        <div class="field"><label>Admin password</label>
-          <input type="password" name="security_password" placeholder="Admin password" autocomplete="off" required />
-          <p class="form-hint">Enter the Admin password or contact Jim Justin Poso via WhatsApp ( +971501905318 ) or Facebook.</p></div>
         <button class="btn block accent" type="submit">Create Account</button>
       </form>
       <p class="auth-alt">Already have an account? <a href="#/login">Sign in</a></p>
     </div></div></div>`;
-  qs('#reg-form').addEventListener('submit', async (e) => {
+  const form = qs('#reg-form');
+  const hidden = document.createElement('input');
+  hidden.type = 'hidden';
+  hidden.name = 'security_password';
+  hidden.value = adminPassword;
+  form.appendChild(hidden);
+  form.addEventListener('submit', async (e) => {
     e.preventDefault();
     const f = e.target;
     const errEl = qs('#err');
@@ -147,7 +178,7 @@ function renderRegister() {
         name: f.name.value.trim(),
         email: f.email.value.trim(),
         password: f.password.value,
-        security_password: f.security_password.value,
+        security_password: hidden.value,
       });
       App.user = data.user;
       App.profile = data.profile;
