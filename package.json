@@ -9,7 +9,7 @@
     "deploy": "wrangler deploy",
     "db:migrate:local": "wrangler d1 migrations apply DB --local",
     "db:migrate:remote": "wrangler d1 migrations apply DB --remote",
-    "test": "node --test tests/parse.test.mjs tests/match.test.mjs tests/offline-math.test.mjs tests/notes-offline.test.mjs tests/notes-api.test.mjs",
+    "test": "node --test tests/parse.test.mjs tests/match.test.mjs tests/offline-math.test.mjs tests/notes-offline.test.mjs tests/notes-api.test.mjs tests/notes-search.test.mjs tests/notes-global-search.test.mjs",
     "tg:poll": "node scripts/telegram-poll.mjs",
     "typecheck": "tsc --noEmit"
   },

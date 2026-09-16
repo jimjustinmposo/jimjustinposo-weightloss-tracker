@@ -28,6 +28,16 @@ function noteDate(s) {
 }
 function fmtBody(s) { return String(s ?? ''); }
 
+/* ---------- global search (all main titles, separate results list) ---------- */
+export function searchNotes(notes, folders, query) {
+  const q = String(query ?? '').trim().toLowerCase();
+  if (!q) return [];
+  const nameById = new Map((folders || []).map((f) => [Number(f.id), f.name]));
+  return (notes || [])
+    .filter((n) => String(n.title ?? '').toLowerCase().includes(q) || String(n.body ?? '').toLowerCase().includes(q))
+    .map((n) => ({ ...n, folder_name: nameById.get(Number(n.folder_id)) || '' }));
+}
+
 /* ---------- folder list ---------- */
 async function renderFolderList(root) {
   const { folders } = await api.get('/api/notes/folders');
@@ -63,6 +73,12 @@ async function renderFolderList(root) {
     </div>
     <section class="card">
       <h3>${icons.folder} My note titles</h3>
+      <form id="notes-search-form" class="searchbox" role="search" style="display:flex;gap:8px">
+        <span aria-hidden="true" style="position:absolute;left:12px;top:12px">${icons.search}</span>
+        <input type="search" id="notes-search" aria-label="Search all notes" placeholder="Search all note titles and text…" autocomplete="off" style="flex:1" />
+        <button class="btn accent" type="submit">Search</button>
+      </form>
+      <section id="notes-search-results" hidden></section>
       <div class="folder-grid">${cards}</div>
     </section>
     <section class="card" style="margin-top:14px">
@@ -75,6 +91,62 @@ async function renderFolderList(root) {
 
   root.dataset.notesView = 'folders';
   currentFolderId = null;
+
+  // Global search: submit → separate results list (all note titles + full text),
+  // click a result → opens that entry. Uses /api/notes so it works offline too.
+  const resultsEl = qs('#notes-search-results', root);
+  const searchInput = qs('#notes-search', root);
+  let searchVersion = 0;
+  const runSearch = async () => {
+    const version = ++searchVersion;
+    const q = searchInput.value.trim();
+    if (!q) { resultsEl.hidden = true; resultsEl.innerHTML = ''; return; }
+    resultsEl.hidden = false;
+    resultsEl.innerHTML = '<p role="status">Searching…</p>';
+    try {
+      const [{ notes: allNotes }, { folders: allFolders }] = await Promise.all([
+        api.get('/api/notes'),
+        api.get('/api/notes/folders'),
+      ]);
+      if (version !== searchVersion) return;
+      const hits = searchNotes(allNotes, allFolders, q);
+      resultsEl.innerHTML = hits.length
+        ? `<h3 style="font-size:14px">${icons.search} Results (${hits.length})</h3>
+           <div class="rowlist">${hits.map((n) => {
+             const b = fmtBody(n.body);
+             const preview = b.length > 120 ? b.slice(0, 117) + '…' : (b || '—');
+             return `
+          <div class="lrow search-note-open" data-id="${Number(n.id)}" role="button" tabindex="0">
+            <div class="grow">
+              <div class="title" style="font-weight:700;font-size:14px">${esc(n.title)}</div>
+              <div class="meta" style="font-size:12px;color:var(--muted)">${esc(preview)}</div>
+              ${n.folder_name ? `<span class="meta">${icons.folder} ${esc(n.folder_name)}</span>` : ''}
+            </div>
+          </div>`;
+           }).join('')}</div>`
+        : `<div class="empty">${icons.search}<p>No matching notes for “${esc(q)}”.</p></div>`;
+      resultsEl.hidden = false;
+      qsa('.search-note-open', resultsEl).forEach((row) => {
+        const open = () => {
+          const n = hits.find((x) => Number(x.id) === Number(row.dataset.id));
+          if (n) editNote(root, Number(n.id), n, runSearch);
+        };
+        row.addEventListener('click', open);
+        row.addEventListener('keydown', (e) => {
+          if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); open(); }
+        });
+      });
+    } catch (err) {
+      if (version !== searchVersion) return;
+      resultsEl.innerHTML = `<p role="alert">${esc(err.message)}</p>`;
+    }
+  };
+  qs('#notes-search-form', root).addEventListener('submit', (e) => { e.preventDefault(); return runSearch(); });
+  searchInput.addEventListener('input', () => {
+    ++searchVersion;
+    resultsEl.hidden = true;
+    resultsEl.innerHTML = '';
+  });
 
   qs('#add-folder-btn', root).addEventListener('click', async () => {
     const { overlay } = openModal({
@@ -212,7 +284,7 @@ async function renderFolderNotes(root, id, folder, folders) {
 }
 
 /* ---------- create / edit a note ---------- */
-function editNote(root, id) {
+function editNote(root, id, selectedNote = null, onSaved = null) {
   const { overlay } = openModal({
     title: id == null ? 'New entry' : 'Edit entry',
     body: `<div class="field"><label>Entry title</label><input id="ne-title" type="text" maxlength="120" placeholder="Entry title" autocomplete="off" /></div>
@@ -221,7 +293,10 @@ function editNote(root, id) {
   const titleEl = qs('#ne-title', overlay);
   const bodyEl = qs('#ne-body', overlay);
 
-  if (id != null) {
+  if (selectedNote) {
+    titleEl.value = selectedNote.title ?? '';
+    bodyEl.value = selectedNote.body ?? '';
+  } else if (id != null) {
     api.get(`/api/notes?folder_id=${currentFolderId}`).then((d) => {
       const n = (d.notes || []).find((x) => Number(x.id) === id);
       if (n) { titleEl.value = n.title; bodyEl.value = n.body ?? ''; }
@@ -243,7 +318,8 @@ function editNote(root, id) {
         toast('Entry saved');
       }
       overlay.remove();
-      await renderFolderNotes(root, currentFolderId);
+      if (onSaved) await onSaved();
+      else await renderFolderNotes(root, currentFolderId);
     } catch (err) { toast(err.message, 'error'); }
   };
   qs('#ne-body', overlay).addEventListener('keydown', (e) => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) save(e); });
