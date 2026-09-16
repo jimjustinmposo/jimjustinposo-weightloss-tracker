@@ -13,8 +13,8 @@
 import * as math from './offline-math.js';
 
 const DB_NAME = 'weightloss-tracker-od';
-const DB_VERSION = 2; // v2: added the 'pushups' store
-const STORES = ['kv', 'users', 'profiles', 'foods', 'logs', 'weights', 'steps', 'pushups', 'ops'];
+const DB_VERSION = 3; // v3: added the 'noteFolders' + 'notes' stores
+const STORES = ['kv', 'users', 'profiles', 'foods', 'logs', 'weights', 'steps', 'pushups', 'noteFolders', 'notes', 'ops'];
 
 /* ---------------- in-memory state ---------------- */
 let dbPromise = null;
@@ -159,6 +159,8 @@ const logKey = (uid, id) => `l${uid}:${id}`;
 const weightKey = (uid, id) => `w${uid}:${id}`;
 const stepKey = (uid, date) => `s${uid}|${date}`;
 const pushupKey = (uid, date) => `p${uid}|${date}`;
+const folderKey = (uid, id) => `nf${uid}:${id}`;
+const noteKey = (uid, id) => `n${uid}:${id}`;
 
 const isoNow = () => {
   const d = new Date();
@@ -282,7 +284,22 @@ async function enqueueOp(uid, op) {
     last_error: null,
     ...op,
   };
-  await storePut('ops', rec);
+  // Allocate order and persist the op in one transaction, including across tabs.
+  // Random IDs must not reorder dependent writes created in the same millisecond.
+  const db = await openDb();
+  await new Promise((resolve, reject) => {
+    const tx = db.transaction(['kv', 'ops'], 'readwrite');
+    const kv = tx.objectStore('kv');
+    const request = kv.get('op-seq');
+    request.onsuccess = () => {
+      rec.seq = Math.max(Date.now(), Number(request.result?.v || 0) + 1);
+      kv.put({ k: 'op-seq', v: rec.seq });
+      tx.objectStore('ops').put(rec);
+    };
+    tx.oncomplete = resolve;
+    tx.onerror = () => reject(tx.error);
+    tx.onabort = () => reject(tx.error);
+  });
   await refreshPendingCount();
   return rec;
 }
@@ -357,6 +374,8 @@ const logsForUser = async (uid) => (await storeGetAll('logs')).filter((r) => r.u
 const weightsForUser = async (uid) => (await storeGetAll('weights')).filter((r) => r.user_id === uid);
 const stepsForUser = async (uid) => (await storeGetAll('steps')).filter((r) => r.user_id === uid);
 const pushupsForUser = async (uid) => (await storeGetAll('pushups')).filter((r) => r.user_id === uid);
+const noteFoldersForUser = async (uid) => (await storeGetAll('noteFolders')).filter((r) => r.user_id === uid);
+const notesForUser = async (uid) => (await storeGetAll('notes')).filter((r) => r.user_id === uid);
 
 const findFoodById = async (uid, id) => {
   const rec = await storeGet('foods', foodKey(uid, id));
@@ -370,6 +389,18 @@ const findWeightById = async (uid, id) => {
   const rec = await storeGet('weights', weightKey(uid, id));
   return rec && rec.user_id === uid ? rec : null;
 };
+const findFolderById = async (uid, id) => {
+  const rec = await storeGet('noteFolders', folderKey(uid, id));
+  return rec && rec.user_id === uid ? rec : null;
+};
+const findFolderByName = async (uid, name) => {
+  const n = String(name || '').toLowerCase();
+  return (await noteFoldersForUser(uid)).find((f) => String(f.name).toLowerCase() === n) || null;
+};
+const findNoteById = async (uid, id) => {
+  const rec = await storeGet('notes', noteKey(uid, id));
+  return rec && rec.user_id === uid ? rec : null;
+};
 const findWeightByDate = async (uid, date) =>
   (await weightsForUser(uid)).find((w) => String(w.log_date) === String(date)) || null;
 const findFoodByName = async (uid, name) => {
@@ -378,6 +409,15 @@ const findFoodByName = async (uid, name) => {
 };
 const findLogByClientId = async (uid, clientId) =>
   (await logsForUser(uid)).find((l) => l.client_id === clientId) || null;
+const findNoteByClientId = async (uid, clientId) =>
+  (await notesForUser(uid)).find((n) => n.client_id === clientId) || null;
+
+/* Count a folder's notes locally (mirrors the server's LEFT JOIN count) so the
+   folder list stays accurate while offline. */
+async function noteCountLocal(uid, folderId) {
+  const rows = await notesForUser(uid);
+  return rows.filter((n) => Number(n.folder_id) === Number(folderId)).length;
+}
 
 function normFood(r, uid) {
   const rec = { ...r, user_id: r.user_id ?? uid };
@@ -404,6 +444,18 @@ function normPushup(r, uid) {
   rec.k = pushupKey(uid, String(rec.log_date));
   return rec;
 }
+function normFolder(r, uid) {
+  const rec = { ...r, user_id: r.user_id ?? uid };
+  rec.k = folderKey(uid, Number(rec.id));
+  return rec;
+}
+function normNote(r, uid) {
+  const rec = { ...r, user_id: r.user_id ?? uid };
+  rec.k = noteKey(uid, Number(rec.id));
+  // Keep the parent link stable when the folder is still local (id < 0).
+  rec.folder_id = r.folder_id ?? rec.folder_id;
+  return rec;
+}
 
 /** Per-store key prefix so replaceUserRows() can wipe one user's rows safely. */
 const uidPrefixFor = (store, uid) => {
@@ -412,7 +464,9 @@ const uidPrefixFor = (store, uid) => {
     case 'logs': return logKey(uid, '');
     case 'weights': return weightKey(uid, '');
     case 'steps': return stepKey(uid, '');
-    case 'pushups': return pushupKey(uid, '');
+        case 'pushups': return pushupKey(uid, '');
+    case 'noteFolders': return folderKey(uid, '');
+    case 'notes': return noteKey(uid, '');
     default: return '';
   }
 };
@@ -439,8 +493,29 @@ async function replaceLogsForDate(uid, date, rows) {
     tx.oncomplete = () => resolve();
     tx.onerror = () => reject(tx.error);
   });
-  await storeBulkPut('logs', rows);
+    await storeBulkPut('logs', rows);
 }
+
+/** Replace cached notes belonging to one folder (used by scoped offline reads / API cache). */
+async function replaceNotesForFolder(uid, folderId, rows) {
+  const all = await notesForUser(uid);
+  const keys = all.filter((n) => String(n.folder_id) === String(folderId)).map((n) => n.k);
+  const db = await openDb();
+  await new Promise((resolve, reject) => {
+    if (keys.length) {
+      const tx = db.transaction('notes', 'readwrite');
+      const os = tx.objectStore('notes');
+      for (const k of keys) os.delete(String(k));
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+      tx.onabort = () => reject(tx.error);
+    } else {
+      resolve();
+    }
+  });
+  await storeBulkPut('notes', rows);
+}
+
 
 async function upsertSteps(uid, rows) {
   const recs = [];
@@ -585,6 +660,34 @@ export async function cacheGet(path) {
       }
       return { series };
     }
+        case '/api/notes/folders': {
+      // Build the folder list + per-folder note count from the local cache.
+      const rows = await notesForUser(uid);
+      const folders = (await noteFoldersForUser(uid))
+        .map((f) => ({ ...stripRow(f), note_count: rows.filter((n) => Number(n.folder_id) === Number(f.id)).length }))
+        .sort((a, b) => String(b.updated_at || '').localeCompare(String(a.updated_at || '')) || Number(b.id) - Number(a.id));
+      return { folders };
+    }
+    case '/api/notes': {
+      const raw = params.get('folder_id');
+      const rows = await notesForUser(uid);
+      let notes;
+      if (raw != null && raw !== '') {
+        notes = rows.filter((n) => String(n.folder_id) === String(raw));
+      } else {
+        notes = rows;
+      }
+      notes = notes
+        .sort((a, b) => String(b.updated_at || '').localeCompare(String(a.updated_at || '')) || Number(b.id) - Number(a.id))
+        .map(stripRow);
+      const result = { notes };
+      if (raw != null && raw !== '') {
+        const folders = await noteFoldersForUser(uid);
+        const f = folders.find((x) => String(x.id) === String(raw));
+        if (f) result.folder = { ...stripRow(f), note_count: await noteCountLocal(uid, Number(f.id)) };
+      }
+      return result;
+    }
     default:
       if (p.startsWith('/api/')) {
         throw new Error(`This view is not available offline (${p}).`);
@@ -636,6 +739,20 @@ export async function cachePutFromGet(path, data) {
     case '/api/pushups/entries':
       await replaceUserRows('pushups', uid, (data.entries || []).map((r) => normPushup(r, uid)));
       break;
+    case '/api/notes/folders':
+      await replaceUserRows('noteFolders', uid, (data.folders || []).map((r) => normFolder(r, uid)));
+      break;
+    case '/api/notes': {
+      const folderId = params.get('folder_id');
+      if (folderId != null && folderId !== '') {
+        // Scoped fetch — only replace notes that belong to this folder.
+        await replaceNotesForFolder(uid, folderId, (data.notes || []).map((r) => normNote(r, uid)));
+      } else {
+        // Full reseed — replace *all* of the user's cached notes.
+        await replaceUserRows('notes', uid, (data.notes || []).map((r) => normNote(r, uid)));
+      }
+      break;
+    }
     case '/api/pushups':
       await upsertPushups(uid, (data.series || []).filter((s) => Number(s.pushups) > 0 || Number(s.calories_burned) > 0));
       break;
@@ -679,8 +796,14 @@ export async function applyServerWrite(method, path, body, data) {
           && String(r.name).toLowerCase() === String(data.food.name).toLowerCase()
           && Number(r.id) !== Number(data.food.id));
         await storeBulkPut('foods', [normFood(data.food, uid)]);
-      } else if (path === '/api/logs' && data.entry) {
+            } else if (path === '/api/logs' && data.entry) {
         await storeBulkPut('logs', [normLog(data.entry, uid)]);
+      } else if (path === '/api/notes/folders' && data.folder) {
+        await storePut('noteFolders', normFolder(data.folder, uid));
+        if (data.folder.client_id) await deleteWhere('noteFolders', (r) => r.client_id === data.folder.client_id && Number(r.id) !== Number(data.folder.id));
+      } else if (path === '/api/notes' && data.note) {
+        await storePut('notes', normNote(data.note, uid));
+        if (data.note.client_id) await deleteWhere('notes', (r) => r.client_id === data.note.client_id && Number(r.id) !== Number(data.note.id));
       }
     } else if (method === 'PUT') {
       if (/^\/api\/logs\/\d+/.test(path) && data.entry) {
@@ -688,7 +811,11 @@ export async function applyServerWrite(method, path, body, data) {
       } else if (/^\/api\/foods\/\d+/.test(path) && data.food) {
         await storeBulkPut('foods', [normFood(data.food, uid)]);
       } else if (/^\/api\/profile/.test(path) && data.profile) {
-        await storePut('profiles', { ...data.profile, k: data.profile.user_id ?? uid });
+                await storePut('profiles', { ...data.profile, k: data.profile.user_id ?? uid });
+      } else if (/^\/api\/notes\/folders\/\d+/.test(path) && data.folder) {
+        await storePut('noteFolders', normFolder(data.folder, uid));
+      } else if (/^\/api\/notes\/\d+/.test(path) && data.note) {
+        await storePut('notes', normNote(data.note, uid));
       }
     } else if (method === 'DELETE') {
       if (/^\/api\/weights\/\d+/.test(path)) {
@@ -708,7 +835,15 @@ export async function applyServerWrite(method, path, body, data) {
         await storeDelete('steps', stepKey(uid, date));
       } else if (/^\/api\/pushups\/\d{4}-\d{2}-\d{2}/.test(path)) {
         const date = decodeURIComponent(path.split('/').pop());
-        await storeDelete('pushups', pushupKey(uid, date));
+                await storeDelete('pushups', pushupKey(uid, date));
+      } else if (/^\/api\/notes\/folders\/\d+/.test(path)) {
+        const id = Number(path.split('/').pop());
+        await storeDelete('noteFolders', folderKey(uid, id));
+        await deleteWhere('notes', (n) => Number(n.folder_id) === id && n.user_id === uid);
+      } else if (/^\/api\/notes\/\d+/.test(path)) {
+        const id = Number(path.split('/').pop());
+        const rec = await findNoteById(uid, id);
+        if (rec) await storeDelete('notes', rec.k);
       }
     }
   } catch (e) {
@@ -1119,20 +1254,161 @@ async function localPushupDelete(uid, date) {
   return { ok: true };
 }
 
-/** Apply a write locally (cache + sync queue) and return a server-shaped response. */
+/* ---------------- local writes for Notes (cache + sync queue) ---------------- */
+
+async function localFolderUpsert(uid, body) {
+  const name = String(body.name ?? '').trim().replace(/\s+/g, ' ').slice(0, 80);
+  if (!name) throw new Error('Folder name is required.');
+  const clientId = (String(body.client_id || '').trim().slice(0, 80)) || newClientId();
+  // De-dupe within the local cache by client_id so a retry never stacks duplicates.
+  const dup = (await noteFoldersForUser(uid)).find((f) => f.client_id === clientId);
+  if (dup) return { folder: { ...stripRow(dup), note_count: await noteCountLocal(uid, Number(dup.id)) || 0 } };
+  if (await findFolderByName(uid, name)) throw new Error('Another folder with that name already exists.');
+  const id = await nextLocalId();
+  const now = isoNow();
+  const rec = {
+    k: folderKey(uid, id), user_id: uid, id, name, client_id: clientId,
+    created_at: now, updated_at: now, note_count: 0,
+  };
+  await storePut('noteFolders', rec);
+  await enqueueOp(uid, {
+    entity: 'noteFolder', method: 'POST', url: '/api/notes/folders',
+    payload: { name, client_id: clientId }, localId: id,
+  });
+  await refreshPendingCount();
+  return { folder: { ...stripRow(rec), note_count: 0 } };
+}
+
+async function localFolderRename(uid, id, body) {
+  const idNum = Number(id);
+  const existing = await findFolderById(uid, idNum);
+  if (!existing) throw new Error('Folder not found offline.');
+  const name = String(body.name ?? existing.name).trim().replace(/\s+/g, ' ').slice(0, 80);
+  if (!name) throw new Error('Folder name is required.');
+  const dup = await findFolderByName(uid, name);
+  if (dup && Number(dup.id) !== idNum) throw new Error('Another folder with that name already exists.');
+    const rec = { ...existing, name, updated_at: isoNow() };
+  await storePut('noteFolders', rec);
+  const isServer = idNum > 0;
+  await enqueueOp(uid, {
+    entity: 'noteFolder', method: 'PUT',
+    url: isServer ? `/api/notes/folders/${idNum}` : '',
+    serverId: isServer ? idNum : null,
+    localId: isServer ? null : idNum,
+    payload: { name, client_id: existing.client_id || null },
+  });
+  await refreshPendingCount();
+  return { folder: { ...stripRow(rec), note_count: await noteCountLocal(uid, idNum) } };
+}
+
+async function localFolderDelete(uid, id) {
+  const idNum = Number(id);
+  const rec = await findFolderById(uid, idNum);
+  if (!rec) return { ok: true }; // already gone locally
+  await storeDelete('noteFolders', rec.k);
+  await deleteWhere('notes', (n) => Number(n.folder_id) === idNum && n.user_id === uid);
+  const hasServerId = Number(rec.id) > 0;
+  await enqueueOp(uid, {
+    entity: 'noteFolder', method: 'DELETE',
+    url: hasServerId ? `/api/notes/folders/${Number(rec.id)}` : '',
+    serverId: hasServerId ? Number(rec.id) : null,
+    localId: idNum, payload: { client_id: rec.client_id || null },
+  });
+    await refreshPendingCount();
+  return { ok: true };
+}
+
+/* ---------- notes ---------- */
+async function localNoteUpsert(uid, body) {
+  const fid = Number(body.folder_id);
+  let folderClientId = null;
+  // folder_id may be a local (negative) id for a folder created offline; we then
+  // carry the folder's client_id so pushOp can resolve it to a server id once it syncs.
+  if (fid && fid < 0) {
+    const f = await findFolderById(uid, fid);
+    if (!f) throw new Error('Folder not found offline.');
+    folderClientId = f.client_id || null;
+  } else if (!fid) {
+    throw new Error('Choose a folder for this note.');
+  }
+  const title = String(body.title ?? '').trim().slice(0, 120) || 'Untitled note';
+  const text = String(body.body ?? '').slice(0, 20000);
+  const clientId = String(body.client_id || '').trim().slice(0, 80) || newClientId();
+  const duplicate = await findNoteByClientId(uid, clientId);
+  if (duplicate) return { note: stripRow(duplicate) };
+  const id = await nextLocalId();
+  const now = isoNow();
+  const rec = {
+    k: noteKey(uid, id), user_id: uid, id,
+    folder_id: fid && fid < 0 ? fid : Number(fid),
+    title, body: text, client_id: clientId, created_at: now, updated_at: now,
+  };
+  await storePut('notes', rec);
+  await enqueueOp(uid, {
+    entity: 'note', method: 'POST', url: '/api/notes',
+    payload: { folder_id: fid && fid < 0 ? null : Number(fid), folder_client_id: folderClientId, title, body: text, client_id: clientId },
+    localId: id,
+  });
+  await refreshPendingCount();
+  return { note: stripRow(rec) };
+}
+
+async function localNoteUpdate(uid, id, body) {
+  const idNum = Number(id);
+  const existing = await findNoteById(uid, idNum);
+  if (!existing) throw new Error('Note not found offline.');
+  const title = String(body.title ?? existing.title).trim().slice(0, 120) || 'Untitled note';
+  const text = body.body != null ? String(body.body).slice(0, 20000) : String(existing.body ?? '');
+  const rec = { ...existing, title, body: text, updated_at: isoNow() };
+    await storePut('notes', rec);
+  const isServer = idNum > 0;
+  await enqueueOp(uid, {
+    entity: 'note', method: 'PUT',
+    url: isServer ? `/api/notes/${idNum}` : '',
+    serverId: isServer ? idNum : null,
+    localId: isServer ? null : idNum,
+    payload: { title, body: text, client_id: existing.client_id || null },
+  });
+  await refreshPendingCount();
+  return { note: stripRow(rec) };
+}
+
+async function localNoteDelete(uid, id) {
+  const idNum = Number(id);
+  const rec = await findNoteById(uid, idNum);
+  if (!rec) return { ok: true };
+    await storeDelete('notes', rec.k);
+  const isServer = idNum > 0;
+  await enqueueOp(uid, {
+    entity: 'note', method: 'DELETE',
+    url: isServer ? `/api/notes/${idNum}` : '',
+    serverId: isServer ? idNum : null,
+    localId: isServer ? null : idNum,
+    payload: { client_id: rec.client_id || null },
+  });
+  await refreshPendingCount();
+  return { ok: true };
+}
+
 export async function applyLocalWrite(method, path, body = {}) {
   const uid = await requireUser();
   if (method === 'POST') {
     if (path === '/api/weights') return localWeightUpsert(uid, body);
     if (path === '/api/steps') return localStepUpsert(uid, body);
     if (path === '/api/pushups') return localPushupUpsert(uid, body);
-    if (path === '/api/foods') return localFoodUpsert(uid, body);
+        if (path === '/api/foods') return localFoodUpsert(uid, body);
     if (path === '/api/logs') return localLogCreate(uid, body);
+    if (path === '/api/notes/folders') return localFolderUpsert(uid, body);
+    if (path === '/api/notes') return localNoteUpsert(uid, body);
   } else if (method === 'PUT') {
     const m = /^\/api\/logs\/(\d+)/.exec(path);
     if (m) return localLogUpdate(uid, Number(m[1]), body);
     const fm = /^\/api\/foods\/(\d+)/.exec(path);
     if (fm) return localFoodUpdate(uid, Number(fm[1]), body);
+    const fdm = /^\/api\/notes\/folders\/(-?\d+)$/.exec(path);
+    if (fdm) return localFolderRename(uid, Number(fdm[1]), body);
+    const nm = /^\/api\/notes\/(-?\d+)$/.exec(path);
+    if (nm) return localNoteUpdate(uid, Number(nm[1]), body);
     if (/^\/api\/profile/.test(path)) return localProfileSave(uid, body);
   } else if (method === 'DELETE') {
     const wm = /^\/api\/weights\/(\d+)/.exec(path);
@@ -1141,6 +1417,10 @@ export async function applyLocalWrite(method, path, body = {}) {
     if (lm) return localLogDelete(uid, Number(lm[1]));
     const fm = /^\/api\/foods\/(\d+)/.exec(path);
     if (fm) return localFoodDelete(uid, Number(fm[1]));
+    const fdm = /^\/api\/notes\/folders\/(-?\d+)$/.exec(path);
+    if (fdm) return localFolderDelete(uid, Number(fdm[1]));
+    const nmd = /^\/api\/notes\/(-?\d+)$/.exec(path);
+    if (nmd) return localNoteDelete(uid, Number(nmd[1]));
     const sm = /^\/api\/steps\/(\d{4}-\d{2}-\d{2})/.exec(path);
     if (sm) return localStepDelete(uid, sm[1]);
     const pm = /^\/api\/pushups\/(\d{4}-\d{2}-\d{2})/.exec(path);
@@ -1206,11 +1486,44 @@ export async function ackCreate(op, data) {
       if (data?.log) await upsertSteps(uid, [data.log]);
     } else if (entity === 'pushup') {
       if (data?.log) await upsertPushups(uid, [data.log]);
-    } else if (entity === 'profile') {
+        } else if (entity === 'profile') {
       if (data?.profile) await storePut('profiles', { ...data.profile, k: data.profile.user_id ?? uid });
+    } else if (entity === 'noteFolder') {
+      const row = data?.folder;
+      const localId = op.localId;
+      if (row && localId != null) {
+        const oldKey = folderKey(uid, localId);
+        const cached = await storeGet('noteFolders', oldKey);
+        if (cached) {
+          await storeDelete('noteFolders', oldKey);
+          await storePut('noteFolders', { ...stripData(cached), ...row, k: folderKey(uid, Number(row.id)), id: Number(row.id), user_id: uid });
+          // children still referencing this local (negative) folder id follow it to the server id.
+          const kids = (await notesForUser(uid)).filter((n) => Number(n.folder_id) === Number(localId) && n.user_id === uid);
+          for (const k of kids) await storePut('notes', { ...k, folder_id: Number(row.id) });
+        } else {
+          await storeBulkPut('noteFolders', [normFolder(row, uid)]);
+        }
+      } else if (row) {
+        await storeBulkPut('noteFolders', [normFolder(row, uid)]);
+      }
+    } else if (entity === 'note') {
+      const row = data?.note;
+      if (row) {
+        const clientId = op.payload?.client_id;
+        const local = clientId ? await findNoteByClientId(uid, clientId) : null;
+        if (local) {
+          if (Number(local.id) !== Number(row.id)) {
+            await storeDelete('notes', local.k);
+            await storePut('notes', { ...stripData(local), ...row, k: noteKey(uid, Number(row.id)), id: Number(row.id), user_id: uid });
+          } else {
+            await storePut('notes', { ...local, ...row, k: local.k });
+          }
+        } else {
+          await storeBulkPut('notes', [normNote(row, uid)]);
+        }
+      }
     }
   } catch (e) {
-    console.error('offline ackCreate failed:', e);
   }
 }
 
@@ -1235,10 +1548,43 @@ export async function pushOp(op) {
       url = `/api/steps/${encodeURIComponent(op.refDate)}`;
     } else if (op.entity === 'pushup') {
       url = `/api/pushups/${encodeURIComponent(op.refDate)}`;
-    } else if (op.entity === 'log' && !op.serverId && body?.client_id) {
+        } else if (op.entity === 'log' && !op.serverId && body?.client_id) {
       const created = await raw('/api/logs', { method: 'POST', body: JSON.stringify(body) });
       url = `/api/logs/${created?.entry?.id}`;
+    } else if (op.entity === 'noteFolder' && !op.serverId) {
+      // Locally-created folder being deleted before it ever synced: resolve to the
+      // server id by client_id (now that earlier create ops may have pushed) or skip.
+      const { folders } = await raw('/api/notes/folders');
+      const row = (folders || []).find((f) => f.client_id === body?.client_id);
+      if (!row) return { skipped: true };
+      url = `/api/notes/folders/${row.id}`;
+    } else if (op.entity === 'note' && !op.serverId && body?.client_id) {
+      const { notes } = await raw('/api/notes');
+      const row = (notes || []).find((n) => n.client_id === body.client_id);
+      if (!row) return { skipped: true };
+      url = `/api/notes/${row.id}`;
     }
+  }
+
+    // Notes created while their folder was still local carry folder_client_id; now
+  // that the folder has synced (or already existed on the server) resolve it to
+  // the real folder_id before the POST reaches the API.
+  if (method === 'POST' && op.entity === 'note' && body && body.folder_id == null && body.folder_client_id) {
+    const { folders } = await raw('/api/notes/folders');
+    const row = (folders || []).find((f) => f.client_id === body.folder_client_id);
+    if (!row) throw new Error('Waiting for parent folder to sync');
+    body.folder_id = row.id;
+  }
+
+  // A note or folder edited/renamed while still local (negative id baked in at
+  // create time) must resolve to its server id once the create op has synced,
+  // otherwise the PUT would hit /api/notes/-1 and 404 forever.
+  if (method === 'PUT' && (op.entity === 'noteFolder' || op.entity === 'note') && op.localId != null && op.localId < 0 && !op.serverId && body && body.client_id) {
+    const isFolder = op.entity === 'noteFolder';
+    const { folders, notes } = await raw(isFolder ? '/api/notes/folders' : '/api/notes');
+    const row = (isFolder ? (folders || []) : (notes || [])).find((r) => r.client_id === body.client_id);
+    if (!row) throw new Error(`Waiting for ${isFolder ? 'folder' : 'note'} to sync`);
+    url = isFolder ? `/api/notes/folders/${row.id}` : `/api/notes/${row.id}`;
   }
 
   const data = await raw(url, { method, body: body != null ? JSON.stringify(body) : undefined });
@@ -1257,7 +1603,9 @@ export async function seedAll(uid, { skipAuth = false } = {}) {
     '/api/weights?limit=365',
     '/api/logs/recent?limit=1000',
     '/api/steps/entries?limit=365',
-    '/api/pushups/entries?limit=365',
+        '/api/pushups/entries?limit=365',
+    '/api/notes/folders',
+    '/api/notes',
   ];
   for (const path of endpoints) {
     try {

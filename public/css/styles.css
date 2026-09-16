@@ -392,5 +392,44 @@ details.day summary .day-totals { margin-left: auto; font-size: 12px; color: var
   .foods-layout > .card:last-child { order: -1; }
 }
 
+/* Notes page */
+.folder-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 12px;
+}
+.notefolder {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px;
+  border: 1px solid var(--line, #e3e6ec);
+  border-radius: 12px;
+  background: var(--card-bg, #fff);
+}
+.folder-open {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  text-align: left;
+  padding: 8px;
+  border: none;
+  background: none;
+  cursor: pointer;
+  flex: 1;
+}
+.folder-open .folder-ic {
+  color: var(--secondary, #42a5f5);
+}
+.folder-meta b { display: block; font-size: 14px; }
+.folder-meta small { color: var(--muted, #888); font-size: 12px; }
+.folder-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 2px;
+  padding: 0 4px 4px 0;
+}
+
+
 
 

@@ -7,6 +7,7 @@ import { renderDashboard } from './dashboard.js';
 import { renderFoodsPage } from './foods.js';
 import { renderSteps } from './steps.js';
 import { renderPushups } from './pushups.js';
+import { renderNotes } from './notes.js';
 import { renderHistory } from './history.js';
 import { renderProfilePage } from './profile.js';
 
@@ -17,7 +18,8 @@ const NAV = [
   { hash: '#/dashboard', label: 'Dashboard', icon: 'home' },
   { hash: '#/foods', label: 'Foods', icon: 'utensils' },
   { hash: '#/steps', label: 'Steps', icon: 'steps' },
-  { hash: '#/pushups', label: 'Pushups', icon: 'pushups' },
+    { hash: '#/pushups', label: 'Pushups', icon: 'pushups' },
+  { hash: '#/notes', label: 'Notes', icon: 'note' },
   { hash: '#/history', label: 'History', icon: 'chart' },
   { hash: '#/profile', label: 'Profile', icon: 'user' },
 ];
@@ -197,7 +199,8 @@ const routes = {
   '#/foods': renderFoodsPage,
   '#/steps': renderSteps,
   '#/pushups': renderPushups,
-  '#/history': renderHistory,
+    '#/history': renderHistory,
+  '#/notes': renderNotes,
   '#/profile': renderProfilePage,
   '#/onboarding': renderProfilePage,
 };
