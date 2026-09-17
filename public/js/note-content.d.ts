@@ -1,0 +1,10 @@
+export const MAX_NOTE_BYTES: number;
+export const MAX_NOTE_TEXT: number;
+export const MAX_NOTE_PHOTOS: number;
+export const MAX_PHOTO_BYTES: number;
+export function validateNoteBody(value: unknown): string;
+export function validPhoto(url: string): boolean;
+export function imageTokens(): RegExp;
+export function notePlainText(value: unknown): string;
+export function unpackNote(value: unknown): { text: string; photos: Map<string, string> };
+export function packNote(text: string, photos: Map<string, string>): string;

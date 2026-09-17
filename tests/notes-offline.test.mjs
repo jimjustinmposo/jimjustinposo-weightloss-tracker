@@ -45,7 +45,10 @@ test('offline folder/note lifecycle, counts, queued payloads and retry', async (
   await offline.persistSession({ id: 77, email: 'notes@example.test' }, null);
   const { folder } = await offline.applyLocalWrite('POST', '/api/notes/folders', { name: 'Ideas', client_id: 'folder-test' });
   assert.ok(Number.isInteger(folder.id) && folder.id < 0, 'local id is a negative integer');
-  const { note } = await offline.applyLocalWrite('POST', '/api/notes', { folder_id: folder.id, title: 'First', body: 'Text', client_id: 'note-test' });
+  const photoBody = 't'.repeat(20000) + '![Photo](data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a8S8AAAAASUVORK5CYII=)';
+  const { note } = await offline.applyLocalWrite('POST', '/api/notes', { folder_id: folder.id, title: 'First', body: photoBody, client_id: 'note-test' });
+  assert.equal(note.body, photoBody);
+  await assert.rejects(offline.applyLocalWrite('PUT', `/api/notes/${note.id}`, { body: 'x'.repeat(20001) }), /20,000/);
   assert.equal(note.client_id, 'note-test');
   assert.equal((await offline.cacheGet('/api/notes/folders')).folders[0].note_count, 1);
   await offline.applyLocalWrite('PUT', `/api/notes/${note.id}`, { title: 'Edited' });
@@ -84,6 +87,8 @@ test('offline folder/note lifecycle, counts, queued payloads and retry', async (
   await offline.pushOp(ops[1]); // lost-response retry must not duplicate
   assert.equal(remote.notes.length, 1);
   assert.equal(remote.notes[0].title, 'Edited');
+  assert.equal(remote.notes[0].body, photoBody, 'Photos survive queued create/update and sync retries');
+  assert.equal((await offline.cacheGet('/api/notes')).notes[0].body, photoBody);
   assert.equal(remote.folders[0].name, 'Renamed');
   assert.equal((await offline.cacheGet('/api/notes/folders')).folders[0].note_count, 1);
   assert.equal(await offline.countPending(77), 0);

@@ -222,6 +222,26 @@ body.app-shell #view {
 }
 .form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 .form-hint { font-size: 11.5px; color: var(--muted); margin-top: 4px; }
+/* ---------- Notes editor ---------- */
+.modal.modal-notes { width: min(800px, 100%); max-height: 92dvh; }
+.modal-notes .field label { margin-bottom: 8px; }
+.modal-notes #ne-title { font-size: 16px; }
+.modal-notes #ne-body {
+  display: block; width: 100%; min-height: 260px; max-height: 50dvh;
+  padding: 14px 16px; border: 1.5px solid var(--line); border-radius: 10px;
+  background: #fff; color: var(--text); caret-color: var(--text);
+  font: 16px/1.6 "Segoe UI", system-ui, sans-serif;
+  resize: vertical; overflow-y: auto; scroll-padding-block: 14px;
+}
+.modal-notes #ne-body:focus {
+  outline: none; border-color: var(--primary); box-shadow: 0 0 0 3px rgba(25,118,210,.14);
+}
+.modal-notes #ne-body::placeholder { color: var(--muted); opacity: 1; }
+.note-photo { max-width: 100%; height: auto; border-radius: 10px; margin: 12px 0; }
+.note-preview { white-space: pre-wrap; overflow-wrap: anywhere; margin-top: 16px; padding: 12px; background: var(--bg); border-radius: 10px; }
+@media (min-width: 640px) { .modal-notes #ne-body { min-height: 320px; } }
+@media (max-height: 600px) { .modal-notes #ne-body { min-height: 140px; } }
+
 /* ---------- Paste-to-fill box on the Foods page ---------- */
 .paste-box { background: var(--bg); border: 1px dashed var(--line); border-radius: var(--radius-sm); padding: 12px; margin-bottom: 16px; }
 .paste-box > label { display: block; font-size: 12.5px; font-weight: 700; color: var(--muted); margin-bottom: 6px; }

@@ -11,6 +11,7 @@
    The UI keeps calling api.get/post/put/del — api.js routes through here.
    ============================================================ */
 import * as math from './offline-math.js';
+import { validateNoteBody } from './note-content.js';
 
 const DB_NAME = 'weightloss-tracker-od';
 const DB_VERSION = 3; // v3: added the 'noteFolders' + 'notes' stores
@@ -1332,7 +1333,7 @@ async function localNoteUpsert(uid, body) {
     throw new Error('Choose a folder for this note.');
   }
   const title = String(body.title ?? '').trim().slice(0, 120) || 'Untitled note';
-  const text = String(body.body ?? '').slice(0, 20000);
+  const text = validateNoteBody(body.body);
   const clientId = String(body.client_id || '').trim().slice(0, 80) || newClientId();
   const duplicate = await findNoteByClientId(uid, clientId);
   if (duplicate) return { note: stripRow(duplicate) };
@@ -1358,7 +1359,7 @@ async function localNoteUpdate(uid, id, body) {
   const existing = await findNoteById(uid, idNum);
   if (!existing) throw new Error('Note not found offline.');
   const title = String(body.title ?? existing.title).trim().slice(0, 120) || 'Untitled note';
-  const text = body.body != null ? String(body.body).slice(0, 20000) : String(existing.body ?? '');
+  const text = body.body != null ? validateNoteBody(body.body) : String(existing.body ?? '');
   const rec = { ...existing, title, body: text, updated_at: isoNow() };
     await storePut('notes', rec);
   const isServer = idNum > 0;

@@ -1,5 +1,6 @@
 import { Hono } from 'hono';
 import { HTTPException } from 'hono/http-exception';
+import { validateNoteBody } from '../../public/js/note-content.js';
 import type { AppVars, Env } from '../types';
 
 type NoteRow = Record<string, unknown>;
@@ -8,7 +9,6 @@ const app = new Hono<{ Bindings: Env; Variables: AppVars }>();
 
 const MAX_FOLDER_NAME = 80;
 const MAX_TITLE = 120;
-const MAX_BODY = 20000;
 
 function cleanFolderName(v: unknown): string {
   return String(v ?? '').trim().replace(/\s+/g, ' ').slice(0, MAX_FOLDER_NAME);
@@ -17,7 +17,8 @@ function cleanTitle(v: unknown): string {
   return String(v ?? '').trim().slice(0, MAX_TITLE);
 }
 function cleanBody(v: unknown): string {
-  return String(v ?? '').slice(0, MAX_BODY);
+  try { return validateNoteBody(v); }
+  catch (err) { throw new HTTPException(400, { message: (err as Error).message }); }
 }
 /** Offline idempotency key (same idea as food_logs.client_id in migration 0004). */
 function cleanClientId(v: unknown): string | null {

@@ -1,7 +1,8 @@
 import api from './api.js';
 import { icons, esc, toast, openModal, prettyDate, qs, qsa } from './util.js';
 
-const MAX_BODY = 20000;
+import { notePlainText } from './note-content.js';
+import { renderNoteBody, wireNoteEditor } from './note-editor.js';
 /* The Notes section keeps its own nav state: null = folder picker, a number = notes in a folder */
 let currentFolderId = null;
 
@@ -26,7 +27,7 @@ function noteDate(s) {
   if (!s || !/^\d{4}-\d{2}-\d{2}/.test(s)) return '—';
   return prettyDate(String(s).slice(0, 10));
 }
-function fmtBody(s) { return String(s ?? ''); }
+function fmtBody(s) { return notePlainText(s); }
 
 /* ---------- global search (all main titles, separate results list) ---------- */
 export function searchNotes(notes, folders, query) {
@@ -34,7 +35,7 @@ export function searchNotes(notes, folders, query) {
   if (!q) return [];
   const nameById = new Map((folders || []).map((f) => [Number(f.id), f.name]));
   return (notes || [])
-    .filter((n) => String(n.title ?? '').toLowerCase().includes(q) || String(n.body ?? '').toLowerCase().includes(q))
+    .filter((n) => String(n.title ?? '').toLowerCase().includes(q) || notePlainText(n.body).toLowerCase().includes(q))
     .map((n) => ({ ...n, folder_name: nameById.get(Number(n.folder_id)) || '' }));
 }
 
@@ -299,7 +300,7 @@ function viewNote(root, note, onSaved = null) {
     title: note.title || 'Untitled entry',
     body: `${note.folder_name ? `<p class="meta">${icons.folder} ${esc(note.folder_name)}</p>` : ''}
       <p class="meta">Updated: ${esc(noteDate(note.updated_at))}</p>
-      <div id="note-details-body" style="white-space:pre-wrap;overflow-wrap:anywhere;margin:16px 0">${esc(fmtBody(note.body)) || 'No text in this entry.'}</div>
+      <div id="note-details-body" style="white-space:pre-wrap;overflow-wrap:anywhere;margin:16px 0">${renderNoteBody(note.body) || 'No text in this entry.'}</div>
       <button class="btn accent block" id="note-details-edit">${icons.pencil} Edit entry</button>`,
   });
   overlay.querySelector('.modal').style.overflowWrap = 'anywhere';
@@ -317,29 +318,43 @@ function viewNote(root, note, onSaved = null) {
 function editNote(root, id, selectedNote = null, onSaved = null) {
   const { overlay } = openModal({
     title: id == null ? 'New entry' : 'Edit entry',
-    body: `<div class="field"><label>Entry title</label><input id="ne-title" type="text" maxlength="120" placeholder="Entry title" autocomplete="off" /></div>
-      <div class="field"><label>Entry text</label><textarea id="ne-body" rows="8" maxlength="${MAX_BODY}" placeholder="Write your note here…"></textarea></div>`,
+    body: `<div class="field"><label for="ne-title">Entry title</label><input id="ne-title" type="text" maxlength="120" placeholder="Entry title" autocomplete="off" /></div>
+      <div class="field"><label for="ne-body">Entry text</label>
+        <textarea id="ne-body" rows="12" placeholder="Write your note here…" aria-describedby="ne-hint"></textarea>
+        <p id="ne-hint" class="form-hint">Paste a photo with Ctrl/Cmd+V, or use Add photo. Up to 4 photos (compressed to 150 KB each). Photo markers show where images appear.</p>
+      </div>
+      <button type="button" class="btn ghost" id="ne-photo-add">${icons.camera} Add photo</button>
+      <input id="ne-photo-file" type="file" accept="image/jpeg,image/png,image/webp" multiple hidden />
+      <p id="ne-status" class="form-hint" role="status" aria-live="polite"></p>
+      <div id="ne-preview" class="note-preview" aria-label="Note preview" hidden></div>`,
   });
+  overlay.querySelector('.modal').classList.add('modal-notes');
   const titleEl = qs('#ne-title', overlay);
-  const bodyEl = qs('#ne-body', overlay);
+  const editor = wireNoteEditor(overlay);
+  editor.load('');
 
   if (selectedNote) {
     titleEl.value = selectedNote.title ?? '';
-    bodyEl.value = selectedNote.body ?? '';
+    editor.load(selectedNote.body ?? '');
   } else if (id != null) {
+    qs('#ne-body', overlay).disabled = true;
     api.get(`/api/notes?folder_id=${currentFolderId}`).then((d) => {
       const n = (d.notes || []).find((x) => Number(x.id) === id);
-      if (n) { titleEl.value = n.title; bodyEl.value = n.body ?? ''; }
-    });
+      if (!n) throw new Error('Entry not found.');
+      titleEl.value = n.title;
+      editor.load(n.body ?? '');
+      qs('#ne-body', overlay).disabled = false;
+    }).catch((err) => { qs('#ne-status', overlay).textContent = err.message; });
   }
   titleEl.focus();
 
   const save = async (e) => {
     if (e) e.preventDefault();
+    if (qs('#ne-body', overlay).disabled) return;
     const title = titleEl.value.trim();
-    const body = bodyEl.value;
-    if (!title && !body) { toast('Nothing to save.'); return; }
     try {
+      const body = editor.getBody();
+      if (!title && !body) { toast('Nothing to save.'); return; }
       if (id == null) {
         await api.post('/api/notes', { folder_id: currentFolderId, title, body, client_id: newClientId() });
         toast('Entry added');

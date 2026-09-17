@@ -52,7 +52,17 @@ test('Notes API: optional client ID, retries, counts, ownership and cascade', as
     assert.equal((await request(`/${note.id}`, 'PUT', { title: 'Intrusion' }, 2)).status, 404);
     assert.equal((await request(`/${note.id}`, 'DELETE', undefined, 2)).status, 404);
     assert.equal((await request('', 'POST', { folder_id: folder.id, title: 'Intrusion' }, 2)).status, 404);
+    const photoBody = 't'.repeat(20000) + '![Photo](data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a8S8AAAAASUVORK5CYII=)';
+    const withPhoto = await (await request(`/${note.id}`, 'PUT', { body: photoBody })).json();
+    assert.equal(withPhoto.note.body, photoBody, 'Photo body must not be truncated at 20,000');
+    const reloaded = await (await request('')).json();
+    assert.equal(reloaded.notes.find((n) => n.id === note.id).body, photoBody);
+    for (const invalid of ['x'.repeat(20001), 'x'.repeat(900001), '![Photo](data:image/svg+xml;base64,PHN2Zy8+)']) {
+      assert.equal((await request(`/${note.id}`, 'PUT', { body: invalid })).status, 400);
+      assert.equal((await request('', 'POST', { folder_id: folder.id, body: invalid })).status, 400);
+    }
     const edited = await (await request(`/${note.id}`, 'PUT', { title: 'Edited' })).json();
+    assert.equal(edited.note.body, photoBody, 'Title-only edits preserve photos');
     assert.equal(edited.note.title, 'Edited');
     assert.equal((await request(`/${note.id}`, 'DELETE')).status, 200);
     assert.equal((await request(`/folders/${folder.id}`, 'DELETE')).status, 200);

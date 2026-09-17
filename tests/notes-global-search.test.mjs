@@ -3,6 +3,8 @@ import assert from 'node:assert/strict';
 import api from '../public/js/api.js';
 import offline from '../public/js/offline.js';
 import { renderNotes } from '../public/js/notes.js';
+import { wireNoteEditor, renderNoteBody, autoGrowNote } from '../public/js/note-editor.js';
+import { validateNoteBody, unpackNote, packNote, notePlainText } from '../public/js/note-content.js';
 
 // Small DOM double for exercising the real view's event handlers, not a browser.
 class Element {
@@ -27,6 +29,10 @@ class Element {
   addEventListener(event, fn) { this.handlers[event] = fn; }
   async fire(event, props = {}) { await this.handlers[event]?.({ preventDefault() {}, ...props }); }
   focus() {} select() {}
+  scrollHeight = 350;
+  selectionStart = 0;
+  selectionEnd = 0;
+  setSelectionRange(start, end) { this.selectionStart = start; this.selectionEnd = end; }
   remove() { this.removed = true; }
   appendChild(child) { this.children.push(child); }
   insertAdjacentHTML(_, html) {
@@ -106,4 +112,54 @@ test('global search submits separately, opens the matching note, and uses offlin
   await root.querySelector('.edit-note').fire('click');
   assert.ok(modalRoot.children.at(-1).querySelector('#ne-body'), 'Pencil still opens the editor');
   assert.ok(root.querySelector('.del-note'), 'Delete action is preserved');
+});
+
+test('note editor auto-grows, accepts pasted photo markers, and renders them safely', async (t) => {
+  const overlay = new Element();
+  const body = new Element('id="ne-body"');
+  const preview = new Element('id="ne-preview"');
+  const status = new Element('id="ne-status"');
+  const add = new Element('id="ne-photo-add"');
+  const picker = new Element('id="ne-photo-file"');
+  overlay.children = [body, preview, status, add, picker];
+  overlay.querySelector = (selector) => overlay.children.find((e) => selector.startsWith('#') ? e.id === selector.slice(1) : e.classes.includes(selector.slice(1))) || null;
+  const originalDocument = globalThis.document;
+  const originalURL = globalThis.URL;
+  const originalImage = globalThis.Image;
+  t.after(() => {
+    if (originalDocument === undefined) delete globalThis.document;
+    else globalThis.document = originalDocument;
+    globalThis.URL = originalURL;
+    if (originalImage === undefined) delete globalThis.Image;
+    else globalThis.Image = originalImage;
+  });
+
+  const editor = wireNoteEditor(overlay);
+  autoGrowNote(body);
+  assert.match(String(body.style.height), /px$/, 'Entry text grows from content height');
+
+  const tinyFile = { type: 'image/png', size: 120 };
+  globalThis.URL = { createObjectURL: () => 'blob:test', revokeObjectURL() {} };
+  globalThis.Image = class {
+    naturalWidth = 1200;
+    naturalHeight = 800;
+    set src(value) { this.onload?.(); }
+  };
+  const canvas = { width: 0, height: 0, getContext: () => ({ fillStyle: '', fillRect() {}, drawImage() {} }), toDataURL: () => 'data:image/jpeg;base64,/9j/' };
+  globalThis.document = { createElement: (tag) => (tag === 'canvas' ? canvas : new Element()) };
+  body.value = 'Before';
+  body.selectionStart = body.selectionEnd = 6;
+  await body.fire('paste', { clipboardData: { items: [{ kind: 'file', getAsFile: () => tinyFile }] } });
+  assert.match(body.value, /!\[Photo\]\(note-photo:[^)]+\)/);
+  assert.equal(status.textContent, 'Photo added. Remove its marker to delete it; save to keep your changes.');
+  assert.equal(preview.hidden, false);
+  assert.match(preview.innerHTML, /<img class="note-photo"/);
+
+  editor.load(`${editor.getBody()}\n<script>alert(1)<\/script>`);
+  assert.match(preview.innerHTML, /&lt;script&gt;/);
+  assert.doesNotMatch(preview.innerHTML, /<script>/);
+  assert.match(preview.innerHTML, /<img class="note-photo"/);
+  assert.match(notePlainText(editor.getBody()), /\[Photo: Photo\]/);
+  assert.match(renderNoteBody(editor.getBody()), /<img class="note-photo"/);
+  assert.equal(editor.getBody(), validateNoteBody(editor.getBody()));
 });

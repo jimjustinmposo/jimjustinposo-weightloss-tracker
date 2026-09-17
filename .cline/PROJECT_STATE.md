@@ -17,10 +17,12 @@
 
 ## Implemented Features
 - [x] Notes entry previews and search results open full read-only details with an Edit action; verified using DOM-double tests.
+- [x] Notes editor uses a professional, auto-growing entry box with visible caret, placeholder, and focus styling.
+- [x] Notes supports pasting/adding compressed inline photos with safe rendering, search exclusions, offline support, and API validation.
 - [x] Notes search and offline lifecycle tests pass.
 
 ## Current Focus
-- Completed click-to-view note details.
+- Completed note editor sizing/photo support and verified tests.
 
 ## Current Problems
 - No failures in the six focused Notes tests (UI/search, offline lifecycle, API).
@@ -40,8 +42,8 @@
 - Required environment variables not inspected for this task.
 
 ## Recent Changes
+- Added photo-capable note details/editor flow, including auto-grow, compression, preview, offline/API persistence, and editor regression coverage.
 - Added full note details dialog (title, folder, updated date, complete text), keyboard opening, Escape close, and Edit action.
-- Extended existing Notes UI test coverage for details and preserved editing.
 
 ## Next Steps
 - Check visual behavior in a browser.
