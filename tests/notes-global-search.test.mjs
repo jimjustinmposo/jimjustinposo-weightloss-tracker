@@ -25,8 +25,9 @@ class Element {
   }
   querySelector(selector) { return this.querySelectorAll(selector)[0] || null; }
   addEventListener(event, fn) { this.handlers[event] = fn; }
-  async fire(event) { await this.handlers[event]?.({ preventDefault() {} }); }
-  focus() {} select() {} remove() {}
+  async fire(event, props = {}) { await this.handlers[event]?.({ preventDefault() {}, ...props }); }
+  focus() {} select() {}
+  remove() { this.removed = true; }
   appendChild(child) { this.children.push(child); }
   insertAdjacentHTML(_, html) {
     this.children.push(...[...html.matchAll(/<button\b([^>]*)>/g)].map((m) => new Element(m[1])));
@@ -34,7 +35,7 @@ class Element {
 }
 
 test('global search submits separately, opens the matching note, and uses offline cache', async (t) => {
-  const notes = [{ id: 21, folder_id: 2, title: 'Shopping', body: 'x'.repeat(200) + ' broccoli' }];
+  const notes = [{ id: 21, folder_id: 2, title: 'Shopping', body: 'x'.repeat(200) + '\n<vegetables> & broccoli', updated_at: '2026-09-17T12:00:00Z' }];
   const folders = [{ id: 1, name: 'Meals', note_count: 0 }, { id: 2, name: 'Errands', note_count: 1 }];
   const modalRoot = new Element();
   const originalDocument = globalThis.document;
@@ -51,7 +52,7 @@ test('global search submits separately, opens the matching note, and uses offlin
   const cached = async (path) => {
     cachedReads.push(path);
     if (path === '/api/notes/folders') return { folders };
-    if (path === '/api/notes') return { notes };
+    if (path === '/api/notes' || path === '/api/notes?folder_id=2') return { notes };
     throw new Error(`Unexpected request: ${path}`);
   };
   t.mock.method(offline, 'isOffline', () => true);
@@ -71,6 +72,15 @@ test('global search submits separately, opens the matching note, and uses offlin
   assert.equal(root.querySelector('.folder-grid').innerHTML, cards);
   assert.ok(cachedReads.includes('/api/notes'));
   await results.querySelector('.search-note-open').fire('click');
+  const details = modalRoot.children.at(-1);
+  assert.ok(details.querySelector('#note-details-body'));
+  assert.ok(details.innerHTML.includes('x'.repeat(200) + '\n&lt;vegetables&gt; &amp; broccoli'));
+  assert.match(details.innerHTML, /Shopping/);
+  assert.match(details.innerHTML, /Errands/);
+  assert.match(details.innerHTML, /Updated:/);
+  assert.equal(details.querySelector('#ne-body'), null, 'Opening a note is read-only');
+  await details.querySelector('#note-details-edit').fire('click');
+  assert.equal(details.removed, true);
   const modal = modalRoot.children.at(-1);
   assert.equal(modal.querySelector('#ne-title').value, 'Shopping');
   assert.equal(modal.querySelector('#ne-body').value, notes[0].body);
@@ -80,4 +90,20 @@ test('global search submits separately, opens the matching note, and uses offlin
   root.querySelector('#notes-search').value = '';
   await form.fire('submit');
   assert.equal(results.hidden, true);
+
+  await root.querySelectorAll('.folder-open').find((btn) => btn.dataset.id === '2').fire('click');
+  const entry = root.querySelector('.view-note');
+  assert.ok(entry, 'Folder entries open full details');
+  assert.match(entry.attrs, /role="button" tabindex="0"/);
+  for (const [event, props] of [['click', {}], ['keydown', { key: 'Enter' }], ['keydown', { key: ' ' }]]) {
+    await entry.fire(event, props);
+    const folderDetails = modalRoot.children.at(-1);
+    assert.ok(folderDetails.querySelector('#note-details-body'));
+    assert.ok(folderDetails.innerHTML.includes('x'.repeat(200) + '\n&lt;vegetables&gt; &amp; broccoli'));
+    await folderDetails.fire('keydown', { key: 'Escape' });
+    assert.equal(folderDetails.removed, true);
+  }
+  await root.querySelector('.edit-note').fire('click');
+  assert.ok(modalRoot.children.at(-1).querySelector('#ne-body'), 'Pencil still opens the editor');
+  assert.ok(root.querySelector('.del-note'), 'Delete action is preserved');
 });

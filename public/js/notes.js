@@ -129,7 +129,7 @@ async function renderFolderList(root) {
       qsa('.search-note-open', resultsEl).forEach((row) => {
         const open = () => {
           const n = hits.find((x) => Number(x.id) === Number(row.dataset.id));
-          if (n) editNote(root, Number(n.id), n, runSearch);
+          if (n) viewNote(root, n, runSearch);
         };
         row.addEventListener('click', open);
         row.addEventListener('keydown', (e) => {
@@ -236,7 +236,7 @@ async function renderFolderNotes(root, id, folder, folders) {
         const preview = b.length > 160 ? b.slice(0, 157) + '…' : (b || '—');
         return `
       <div class="lrow notefolder-note" data-id="${Number(n.id)}">
-        <div class="grow">
+        <div class="grow view-note" data-id="${Number(n.id)}" role="button" tabindex="0" aria-label="View entry: ${esc(n.title || 'Untitled entry')}" style="cursor:pointer">
           <div class="title" style="font-weight:700;font-size:14px">${esc(n.title)}</div>
           <div class="meta" style="font-size:12px;color:var(--muted);white-space:pre-wrap;max-height:4.5em;overflow:hidden">${esc(preview)}</div>
           <span class="meta">${noteDate(n.updated_at)}</span>
@@ -253,7 +253,7 @@ async function renderFolderNotes(root, id, folder, folders) {
   root.innerHTML = `
     <div class="page-title" style="margin-bottom:8px">
       <div><h2 style="display:flex;align-items:center;gap:6px">${icons.folder} ${esc(f.name)}</h2>
-        <p><span class="meta">${count} entr${count === 1 ? 'y' : 'ies'}</span> · tap an entry to edit · offline & synced</p>
+        <p><span class="meta">${count} entr${count === 1 ? 'y' : 'ies'}</span> · tap an entry to view details · offline & synced</p>
       </div>
       <div style="display:flex;gap:6px">
         <button class="btn ghost" id="back-folders" title="Back to note titles">${icons.chevD}</button>
@@ -270,6 +270,16 @@ async function renderFolderNotes(root, id, folder, folders) {
 
   qs('#back-folders', root).addEventListener('click', () => backToFolders(root));
   qs('#add-note-btn', root).addEventListener('click', () => editNote(root, null));
+  qsa('.view-note', root).forEach((btn) => {
+    const open = () => {
+      const note = list.find((n) => Number(n.id) === Number(btn.dataset.id));
+      if (note) viewNote(root, { ...note, folder_name: f.name });
+    };
+    btn.addEventListener('click', open);
+    btn.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); open(); }
+    });
+  });
   qsa('.edit-note', root).forEach((btn) => btn.addEventListener('click', () => editNote(root, Number(btn.dataset.id))));
   qsa('.del-note', root).forEach((btn) => {
     btn.addEventListener('click', async () => {
@@ -280,6 +290,26 @@ async function renderFolderNotes(root, id, folder, folders) {
         await renderFolderNotes(root, currentFolderId);
       } catch (err) { toast(err.message, 'error'); }
     });
+  });
+}
+
+/* ---------- read a full note ---------- */
+function viewNote(root, note, onSaved = null) {
+  const { overlay, close } = openModal({
+    title: note.title || 'Untitled entry',
+    body: `${note.folder_name ? `<p class="meta">${icons.folder} ${esc(note.folder_name)}</p>` : ''}
+      <p class="meta">Updated: ${esc(noteDate(note.updated_at))}</p>
+      <div id="note-details-body" style="white-space:pre-wrap;overflow-wrap:anywhere;margin:16px 0">${esc(fmtBody(note.body)) || 'No text in this entry.'}</div>
+      <button class="btn accent block" id="note-details-edit">${icons.pencil} Edit entry</button>`,
+  });
+  overlay.querySelector('.modal').style.overflowWrap = 'anywhere';
+  qs('.modal-close', overlay).focus();
+  overlay.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') close();
+  });
+  qs('#note-details-edit', overlay).addEventListener('click', () => {
+    close();
+    editNote(root, Number(note.id), note, onSaved);
   });
 }
 
