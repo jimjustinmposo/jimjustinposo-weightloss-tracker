@@ -5,6 +5,7 @@ import { num } from '../types';
 import { AiUnavailableError } from '../telegram/ai';
 import { maxOfRange, round2 } from '../telegram/textparse';
 import { extractTextFromAiResult, WORKERS_AI_MODEL, workersAi } from '../ai';
+import { rateLimited } from '../rate-limit';
 
 const app = new Hono<{ Bindings: Env; Variables: AppVars }>();
 
@@ -22,6 +23,9 @@ const app = new Hono<{ Bindings: Env; Variables: AppVars }>();
  * hint in that case instead of a required field.
  */
 app.post('/estimate', async (c) => {
+  // Each call spends AI quota — keep a per-client ceiling.
+  const limited = rateLimited(c, 'nutrition', 30, 5 * 60_000);
+  if (limited) return limited;
   const body = (await c.req.json().catch(() => ({}))) as Record<string, unknown>;
   const name = String(body.name ?? '').trim().slice(0, 120);
   const grams = num(body.grams, NaN);
@@ -30,6 +34,12 @@ app.post('/estimate', async (c) => {
   if (!name && !image) throw new HTTPException(400, { message: 'Food name (or a photo) is required.' });
   if (image && !/^data:image\/[a-z0-9.+-]+;base64,/i.test(image)) {
     throw new HTTPException(400, { message: 'Photo must be a base64 image data URL.' });
+  }
+  /* Hard cap on the payload size: the client already compresses photos, so
+     anything bigger is a mistake or abuse and would only burn AI quota. */
+  const MAX_IMAGE_CHARS = 6 * 1024 * 1024; // ≈4.5 MB of binary image data
+  if (image.length > MAX_IMAGE_CHARS) {
+    throw new HTTPException(413, { message: 'That photo is too large — please try a smaller image.' });
   }
   if (!Number.isFinite(grams) || grams <= 0 || grams > 5000) {
     throw new HTTPException(400, { message: 'Amount must be between 0 and 5,000 grams.' });

@@ -1,0 +1,36 @@
+# ============================================================
+# _headers — response headers for the static SPA shell.
+#
+# The security block below MUST stay identical to SECURITY_HEADERS in
+# src/index.ts: Cloudflare's asset server can answer these files without
+# running the Worker, so both layers have to carry the same values.
+# Cache windows are deliberately short + stale-while-revalidate so a
+# deploy cannot serve a stale JS/CSS mix for long (filenames are not
+# content-hashed); the service worker still gives instant offline loads.
+# ============================================================
+
+/*
+  Content-Security-Policy: default-src 'self'; base-uri 'self'; connect-src 'self'; font-src 'self'; form-action 'self'; frame-ancestors 'none'; frame-src 'none'; img-src 'self' data: blob:; manifest-src 'self'; media-src 'self'; object-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; worker-src 'self'
+  Cross-Origin-Opener-Policy: same-origin
+  Cross-Origin-Resource-Policy: same-origin
+  Permissions-Policy: camera=(), microphone=(), geolocation=(), payment=()
+  Referrer-Policy: no-referrer
+  Strict-Transport-Security: max-age=15552000; includeSubDomains
+  X-Content-Type-Options: nosniff
+  X-Frame-Options: DENY
+
+/js/*
+  Cache-Control: public, max-age=300, stale-while-revalidate=3600
+
+/css/*
+  Cache-Control: public, max-age=300, stale-while-revalidate=3600
+
+/icon.svg
+  Cache-Control: public, max-age=604800
+
+/manifest.webmanifest
+  Cache-Control: public, max-age=3600
+
+# The SPA document must always be revalidated so new builds roll out.
+/
+  Cache-Control: no-cache

@@ -3,13 +3,9 @@ import offline from './offline.js';
 import * as sync from './sync.js';
 import { App, profileComplete } from './state.js';
 import { icons, toast, esc, qs } from './util.js';
-import { renderDashboard } from './dashboard.js';
-import { renderFoodsPage } from './foods.js';
-import { renderSteps } from './steps.js';
-import { renderPushups } from './pushups.js';
-import { renderNotes } from './notes.js';
-import { renderHistory } from './history.js';
-import { renderProfilePage } from './profile.js';
+/* View modules are NOT imported here: each one is pulled in on demand by the
+   router below, so the first paint (login / dashboard) never pays for the
+   whole app's JavaScript. */
 
 const view = () => document.getElementById('view');
 const shell = () => document.getElementById('shell');
@@ -194,15 +190,17 @@ function renderRegisterForm(adminPassword) {
   });
 }
 /* ---------------- Router ---------------- */
+/* Each entry is a loader: the browser downloads that one module the first
+   time its page is opened (and never again — ES modules are cached). */
 const routes = {
-  '#/dashboard': renderDashboard,
-  '#/foods': renderFoodsPage,
-  '#/steps': renderSteps,
-  '#/pushups': renderPushups,
-    '#/history': renderHistory,
-  '#/notes': renderNotes,
-  '#/profile': renderProfilePage,
-  '#/onboarding': renderProfilePage,
+  '#/dashboard': () => import('./dashboard.js').then((m) => m.renderDashboard),
+  '#/foods': () => import('./foods.js').then((m) => m.renderFoodsPage),
+  '#/steps': () => import('./steps.js').then((m) => m.renderSteps),
+  '#/pushups': () => import('./pushups.js').then((m) => m.renderPushups),
+  '#/history': () => import('./history.js').then((m) => m.renderHistory),
+  '#/notes': () => import('./notes.js').then((m) => m.renderNotes),
+  '#/profile': () => import('./profile.js').then((m) => m.renderProfilePage),
+  '#/onboarding': () => import('./profile.js').then((m) => m.renderProfilePage),
 };
 
 async function route() {
@@ -228,8 +226,9 @@ async function route() {
   buildShell();
   markActive();
 
-  const handler = routes[hash] || renderDashboard;
+  const load = routes[hash] || routes['#/dashboard'];
   try {
+    const handler = await load();
     await handler(view());
   } catch (err) {
     console.error(err);

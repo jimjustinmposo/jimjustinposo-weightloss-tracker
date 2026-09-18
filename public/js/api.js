@@ -30,10 +30,12 @@ async function handle(path, method, body) {
 
     // While unsynced local changes exist, read from the cache so the user
     // always sees their own most recent edits (the queue flushes in background).
+    // Uses the in-memory pending count — offline.js keeps it current on every
+    // queue change — so the common case costs no IndexedDB round-trip.
     const uid = offline.getUser();
     let pending = false;
     try {
-      pending = uid != null && !path.startsWith('/api/auth/') && (await offline.hasPending(uid));
+      pending = uid != null && !path.startsWith('/api/auth/') && offline.getStatus().pending > 0;
     } catch { /* storage unavailable → behave exactly like the old online app */ }
     if (pending) {
       return offline.cacheGet(path);

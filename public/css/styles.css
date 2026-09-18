@@ -40,6 +40,16 @@ input, select { font: inherit; }
 ::selection { background: rgba(100, 181, 246, 0.35); }
 .ic { flex: none; }
 
+@media (prefers-reduced-motion: reduce) {
+  /* Respect the OS accessibility setting and skip decorative motion. */
+  *, *::before, *::after {
+    animation-duration: .01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: .01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
 /* ---------- Layout shell ---------- */
 /* FIXED, not sticky: the header lives inside #shell, whose height equals its own
    content — `position: sticky` had nothing to stick within, so the menu scrolled

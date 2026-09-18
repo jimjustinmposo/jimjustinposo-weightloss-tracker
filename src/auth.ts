@@ -72,7 +72,10 @@ export async function createSession(db: D1Database, userId: number): Promise<str
 }
 
 export function setSessionCookie(c: Ctx, token: string): void {
-  const secure = new URL(c.req.url).protocol === 'https:';
+  /* `Secure` is on whenever the request arrived over HTTPS. Cloudflare
+     terminates TLS, so the original scheme also arrives in x-forwarded-proto. */
+  const forwarded = (c.req.header('x-forwarded-proto') || '').split(',')[0].trim().toLowerCase();
+  const secure = forwarded === 'https' || new URL(c.req.url).protocol === 'https:';
   setCookie(c, SESSION_COOKIE, token, {
     httpOnly: true,
     sameSite: 'Lax',

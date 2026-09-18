@@ -12,6 +12,14 @@
   <title>WeightLoss Tracker</title>
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath fill='%231976D2' d='M12 21s-8.2-5.4-8.2-11A4.7 4.7 0 0 1 12 6.6a4.7 4.7 0 0 1 8.2 3.4c0 5.6-8.2 11-8.2 11z'/%3E%3C/svg%3E" />
   <link rel="stylesheet" href="/css/styles.css" />
+  <!-- Boot-critical modules: start these transfers immediately instead of
+       waiting for app.js to be parsed (removes a request round-trip).
+       Route modules (dashboard/notes/...) load on demand. -->
+  <link rel="modulepreload" href="/js/api.js" />
+  <link rel="modulepreload" href="/js/offline.js" />
+  <link rel="modulepreload" href="/js/state.js" />
+  <link rel="modulepreload" href="/js/util.js" />
+  <link rel="modulepreload" href="/js/sync.js" />
 </head>
 <body>
   <div id="shell"></div>

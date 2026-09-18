@@ -1,6 +1,7 @@
 import { Hono } from 'hono';
 import { HTTPException } from 'hono/http-exception';
 import { createSession, destroySession, hashPassword, requireAuth, setSessionCookie, verifyPassword } from '../auth';
+import { rateLimited } from '../rate-limit';
 import type { AppVars, Env } from '../types';
 
 type UserRow = { id: number; email: string; name: string | null; is_admin?: number };
@@ -20,6 +21,8 @@ async function mePayload(c: { env: Env; get: (k: 'userId') => number }) {
 }
 
 app.post('/register', async (c) => {
+  const limited = rateLimited(c, 'register', 10, 10 * 60_000);
+  if (limited) return limited;
   const body = (await c.req.json().catch(() => ({}))) as Record<string, unknown>;
   const email = String(body.email ?? '').trim().toLowerCase();
   const password = String(body.password ?? '');
@@ -65,6 +68,9 @@ app.post('/register', async (c) => {
 });
 
 app.post('/verify-admin', async (c) => {
+  // The admin password is the signup gate — throttle guessing hard.
+  const limited = rateLimited(c, 'verify-admin', 8, 10 * 60_000);
+  if (limited) return limited;
   const body = (await c.req.json().catch(() => ({}))) as Record<string, unknown>;
   const password = String(body.password ?? '');
   const adminRow = await c.env.DB.prepare('SELECT id, password_hash FROM users WHERE email = ?1')
@@ -79,6 +85,8 @@ app.post('/verify-admin', async (c) => {
 });
 
 app.post('/login', async (c) => {
+  const limited = rateLimited(c, 'login', 10, 5 * 60_000);
+  if (limited) return limited;
   const body = (await c.req.json().catch(() => ({}))) as Record<string, unknown>;
   const email = String(body.email ?? '').trim().toLowerCase();
   const password = String(body.password ?? '');

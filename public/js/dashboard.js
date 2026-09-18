@@ -2,7 +2,8 @@ import api from './api.js';
 import { App } from './state.js';
 import { icons, fmt, esc, toast, openModal, todayStr, qs, qsa } from './util.js';
 import { lineChart, barChart, ring, macroBar, emptyChart } from './charts.js';
-import { foodPickerModal } from './foods.js';
+/* The "Log Food" picker lives in foods.js; it is pulled in only when the
+   button is tapped, so opening the dashboard never downloads the Foods page. */
 import { DIET_OPTIONS } from './profile.js';
 
 function mealLabel(m) {
@@ -35,6 +36,10 @@ function bmiBadgeClass(bmiValue) {
    fraction (pure attribute tweening — works in every browser) while the center
    number counts up. E.g. 800/1600 kcal → the circle ends exactly half blue. */
 function animateRings(rootEl, dur = 900) {
+  /* Reduced-motion users get the final state immediately: the markup already
+     carries the true stroke-dashoffset and the final number, so skipping the
+     tween is exact — and it saves 900 ms of per-frame work on every render. */
+  if (typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches) return;
   qsa('.ring-wrap', rootEl).forEach((wrapEl) => {
     const fg = qs('.ring-fg', wrapEl);
     const bigEl = qs('.ring-center .big', wrapEl);
@@ -541,7 +546,10 @@ export async function renderDashboard(root) {
   qs('#qa-weight', root).addEventListener('click', () => weightModal(() => renderDashboard(root)));
   qs('#qa-steps', root).addEventListener('click', () => stepsModal(() => renderDashboard(root)));
   qs('#qa-pushups', root).addEventListener('click', () => pushupsModal(() => renderDashboard(root)));
-  qs('#qa-food', root).addEventListener('click', () => foodPickerModal(() => renderDashboard(root)));
+  qs('#qa-food', root).addEventListener('click', async () => {
+    const { foodPickerModal } = await import('./foods.js');
+    foodPickerModal(() => renderDashboard(root));
+  });
 
   qsa('.del-log', root).forEach((btn) =>
     btn.addEventListener('click', async () => {
