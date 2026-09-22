@@ -281,7 +281,9 @@ async function renderFolderNotes(root, id, folder, folders) {
       if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); open(); }
     });
   });
-  qsa('.edit-note', root).forEach((btn) => btn.addEventListener('click', () => editNote(root, Number(btn.dataset.id))));
+  // Pass the already-fetched note object — otherwise the editor re-downloads
+  // the whole folder (every body + photo blob) just to find one note by id.
+  qsa('.edit-note', root).forEach((btn) => btn.addEventListener('click', () => editNote(root, Number(btn.dataset.id), list.find((n) => Number(n.id) === Number(btn.dataset.id)))));
   qsa('.del-note', root).forEach((btn) => {
     btn.addEventListener('click', async () => {
       if (!confirm('Delete this entry?')) return;

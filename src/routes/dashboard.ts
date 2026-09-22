@@ -18,7 +18,6 @@ const SQL_DAY_TOTALS = `SELECT COALESCE(SUM(calories),0) AS calories, COALESCE(S
         COALESCE(SUM(carbs),0) AS carbs, COALESCE(SUM(fat),0) AS fat
  FROM food_logs WHERE user_id = ?1 AND log_date = ?2`;
 const SQL_STEPS_TODAY = 'SELECT steps, calories_burned FROM step_logs WHERE user_id = ?1 AND log_date = ?2';
-const SQL_PUSHUPS_TODAY = 'SELECT pushups, calories_burned FROM pushup_logs WHERE user_id = ?1 AND log_date = ?2';
 
 /**
  * One day's consumed/burned/net totals — reused by the Telegram /today and
@@ -45,7 +44,12 @@ export async function getDaySummary(db: D1Database, userId: number, date: string
   };
 }
 
-/** Everything the dashboard needs in one round-trip. */
+/** Everything the dashboard needs in one round-trip.
+ *  D1-minimal version: every table is read exactly ONCE per request.
+ *  - today's meal rows double as the day-totals source (no extra SUM scan),
+ *  - plain 7-day range selects replace the three recursive-CTE joins; the
+ *    zero-fill that COALESCE did in SQL happens here (identical output),
+ *  - today's steps/pushups come from the same range rows (no point reads). */
 app.get('/', async (c) => {
   const userId = c.get('userId');
   const date = c.req.query('date');
@@ -53,62 +57,81 @@ app.get('/', async (c) => {
 
   const rangeStart = shift(date, -6);
 
-  const [profileRow, totalsRow, mealsRows, stepsTodayRow, pushupsTodayRow, weightsRows, stepsSeriesRows, pushupsSeriesRows, calSeriesRows] =
+  const [profileRow, mealsRows, weightsRows, foodRangeRows, stepsRangeRows, pushupsRangeRows] =
     await Promise.all([
       c.env.DB.prepare('SELECT * FROM profiles WHERE user_id = ?1').bind(userId).first<Any>(),
-      c.env.DB.prepare(SQL_DAY_TOTALS).bind(userId, date).first<Any>(),
       c.env.DB.prepare(
         'SELECT * FROM food_logs WHERE user_id = ?1 AND log_date = ?2 ORDER BY created_at ASC, id ASC'
       )
         .bind(userId, date)
         .all<Any>(),
-      c.env.DB.prepare(SQL_STEPS_TODAY).bind(userId, date).first<Any>(),
-      c.env.DB.prepare(SQL_PUSHUPS_TODAY).bind(userId, date).first<Any>(),
       c.env.DB.prepare('SELECT log_date, weight FROM weight_logs WHERE user_id = ?1 ORDER BY log_date DESC LIMIT 90')
         .bind(userId)
         .all<Any>(),
       c.env.DB.prepare(
-        `WITH RECURSIVE seq(d) AS (
-           SELECT ?2 UNION ALL SELECT date(d, '+1 day') FROM seq WHERE d < ?3
-         )
-         SELECT s.d AS log_date,
-                COALESCE(sl.steps, 0) AS steps,
-                COALESCE(sl.calories_burned, 0) AS calories_burned
-         FROM seq s LEFT JOIN step_logs sl ON sl.user_id = ?1 AND sl.log_date = s.d
-         ORDER BY s.d`
+        'SELECT log_date, calories FROM food_logs WHERE user_id = ?1 AND log_date BETWEEN ?2 AND ?3'
       )
         .bind(userId, rangeStart, date)
         .all<Any>(),
       c.env.DB.prepare(
-        `WITH RECURSIVE seq(d) AS (
-           SELECT ?2 UNION ALL SELECT date(d, '+1 day') FROM seq WHERE d < ?3
-         )
-         SELECT s.d AS log_date,
-                COALESCE(pl.pushups, 0) AS pushups,
-                COALESCE(pl.calories_burned, 0) AS calories_burned
-         FROM seq s LEFT JOIN pushup_logs pl ON pl.user_id = ?1 AND pl.log_date = s.d
-         ORDER BY s.d`
+        'SELECT log_date, steps, calories_burned FROM step_logs WHERE user_id = ?1 AND log_date BETWEEN ?2 AND ?3'
       )
         .bind(userId, rangeStart, date)
         .all<Any>(),
       c.env.DB.prepare(
-        `WITH RECURSIVE seq(d) AS (
-           SELECT ?2 UNION ALL SELECT date(d, '+1 day') FROM seq WHERE d < ?3
-         )
-         SELECT s.d AS log_date, COALESCE(ROUND(SUM(fl.calories)), 0) AS calories
-         FROM seq s LEFT JOIN food_logs fl ON fl.user_id = ?1 AND fl.log_date = s.d
-         GROUP BY s.d ORDER BY s.d`
+        'SELECT log_date, pushups, calories_burned FROM pushup_logs WHERE user_id = ?1 AND log_date BETWEEN ?2 AND ?3'
       )
         .bind(userId, rangeStart, date)
         .all<Any>(),
     ]);
 
+  /* Day totals computed from today's rows — same values and same 2-decimal
+     rounding the SQL SUM() produced. */
+  let sumCalories = 0;
+  let sumProtein = 0;
+  let sumCarbs = 0;
+  let sumFat = 0;
+  for (const e of mealsRows.results) {
+    sumCalories += Number(e.calories ?? 0);
+    sumProtein += Number(e.protein ?? 0);
+    sumCarbs += Number(e.carbs ?? 0);
+    sumFat += Number(e.fat ?? 0);
+  }
   const consumed = {
-    calories: Math.round(Number(totalsRow?.calories ?? 0) * 100) / 100,
-    protein: Math.round(Number(totalsRow?.protein ?? 0) * 100) / 100,
-    carbs: Math.round(Number(totalsRow?.carbs ?? 0) * 100) / 100,
-    fat: Math.round(Number(totalsRow?.fat ?? 0) * 100) / 100,
+    calories: Math.round(sumCalories * 100) / 100,
+    protein: Math.round(sumProtein * 100) / 100,
+    carbs: Math.round(sumCarbs * 100) / 100,
+    fat: Math.round(sumFat * 100) / 100,
   };
+
+  const stepsByDate = new Map<string, Any>();
+  for (const r of stepsRangeRows.results) stepsByDate.set(String(r.log_date), r);
+  const pushupsByDate = new Map<string, Any>();
+  for (const r of pushupsRangeRows.results) pushupsByDate.set(String(r.log_date), r);
+  const caloriesByDate = new Map<string, number>();
+  for (const r of foodRangeRows.results) {
+    const d = String(r.log_date);
+    caloriesByDate.set(d, (caloriesByDate.get(d) ?? 0) + Number(r.calories ?? 0));
+  }
+
+  /* Zero-filled 7-day series (rangeStart … date), built in JS — exactly what
+     `WITH RECURSIVE seq … LEFT JOIN … COALESCE(…, 0)` returned, minus the
+     per-day join lookups D1 billed as row reads. */
+  const days: string[] = [];
+  for (let i = 6; i >= 0; i--) days.push(shift(date, -i));
+  const stepsSeries = days.map((d) => {
+    const r = stepsByDate.get(d);
+    return { log_date: d, steps: Number(r?.steps ?? 0), calories_burned: Number(r?.calories_burned ?? 0) };
+  });
+  const pushupsSeries = days.map((d) => {
+    const r = pushupsByDate.get(d);
+    return { log_date: d, pushups: Number(r?.pushups ?? 0), calories_burned: Number(r?.calories_burned ?? 0) };
+  });
+  // ROUND(SUM(calories)) per day, 0 when empty — identical to the old SQL.
+  const caloriesSeries = days.map((d) => ({ log_date: d, calories: Math.round(caloriesByDate.get(d) ?? 0) }));
+
+  const stepsTodayRow = stepsByDate.get(date);
+  const pushupsTodayRow = pushupsByDate.get(date);
   const steps = Number(stepsTodayRow?.steps ?? 0);
   const burnedSteps = Math.round(Number(stepsTodayRow?.calories_burned ?? 0) * 10) / 10;
   const pushups = Number(pushupsTodayRow?.pushups ?? 0);
@@ -155,9 +178,9 @@ app.get('/', async (c) => {
     remaining_calories: remaining,
     meals,
     weight_series: weightsRows.results.slice().reverse(),
-    steps_series: stepsSeriesRows.results,
-    pushups_series: pushupsSeriesRows.results,
-    calories_series: calSeriesRows.results,
+    steps_series: stepsSeries,
+    pushups_series: pushupsSeries,
+    calories_series: caloriesSeries,
   });
 });
 

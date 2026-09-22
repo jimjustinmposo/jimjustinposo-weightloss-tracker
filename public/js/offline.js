@@ -1595,16 +1595,30 @@ export async function pushOp(op) {
   }
   return data;
 }
-/** Pull the latest server data into the local cache (after the queue drains). */
-export async function seedAll(uid, { skipAuth = false } = {}) {
-  if (uid == null) return;
+/** Pull the latest server data into the local cache (after the queue drains).
+ *
+ *  D1-sparing version:
+ *  • `skipAuth` omits the /api/auth/me read — callers that already fetched the
+ *    session (app boot, login) don't pay for it a second time.
+ *  • `freshWindowMs` turns the seed into a no-op when one ran less than that
+ *    many ms ago. Without it, EVERY page load / PWA reopen re-downloaded all
+ *    the data even though nothing changed — with 9 endpoints that is the main
+ *    source of D1 read volume.
+ *  • Limits match what the UI actually requests (history: 90 weights / 500
+ *    logs; steps & pushups pages: 180) instead of 365/1000 full-table pulls. */
+export async function seedAll(uid, { skipAuth = false, freshWindowMs = 0 } = {}) {
+  if (uid == null) return false;
+  if (freshWindowMs > 0) {
+    const last = await kvGet(`lastSync.${uid}`);
+    if (last && Date.now() - Number(last) < freshWindowMs) return false; // still fresh — skip
+  }
   const endpoints = [
     '/api/profile',
     '/api/foods',
-    '/api/weights?limit=365',
-    '/api/logs/recent?limit=1000',
-    '/api/steps/entries?limit=365',
-        '/api/pushups/entries?limit=365',
+    '/api/weights?limit=90',
+    '/api/logs/recent?limit=500',
+    '/api/steps/entries?limit=180',
+    '/api/pushups/entries?limit=180',
     '/api/notes/folders',
     '/api/notes',
   ];
@@ -1624,6 +1638,7 @@ export async function seedAll(uid, { skipAuth = false } = {}) {
   status.lastSyncAt = Date.now();
   await refreshPendingCount();
   renderStatus();
+  return true;
 }
 
 /* ---------------- status pill ---------------- */

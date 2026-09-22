@@ -28,7 +28,7 @@
 - [x] Session cookie sets `Secure` whenever the request arrived over HTTPS.
 
 ## Current Focus
-- Performance + security hardening only; features and existing behaviour preserved.
+- D1 usage optimization: minimize row reads/writes per user session without changing features.
 
 ## Current Problems
 - No known failures. `npm test` (49 tests), `tsc --noEmit`, `wrangler deploy --dry-run` and a live `wrangler dev` smoke test all pass.
@@ -53,11 +53,15 @@
 - Required environment variables not inspected for this task.
 
 ## Recent Changes
-- Added CSP + security headers, API `no-store`, same-origin (CSRF) check and per-IP rate limiting on auth/nutrition endpoints.
-- Lazy-loaded route modules + modulepreload hints; dashboard loads the food picker on demand.
-- Removed a per-request IndexedDB read from api.js (uses the in-memory pending count).
-- Service worker bumped to v7 and now precaches pushups.js; added public/_headers caching for /js, /css, /icon.svg, /manifest.webmanifest.
-- Respect `prefers-reduced-motion` in CSS and skip the dashboard ring animation for those users.
+- D1 optimization: GET /api/dashboard reduced from 9 queries (3 recursive CTE joins + duplicate scans) to 6 plain selects; each table read once, zero-fill done in JS; identical JSON output.
+- seedAll() no longer full-table pulls: limits aligned to UI (weights 90, logs 500, steps/pushups 180) and a freshWindowMs throttle skips re-seeding when nothing changed.
+- sync.js seeds only when ops were pushed (or cache is >5 min stale); notifyDataChanged fires only after a real seed.
+- Notes edit reuses the already-fetched note object (no folder-wide re-download incl. photo blobs).
+- Service worker bumped to v8 to evict stale bundles.
+
+## D1 Usage Model (single user, <500 records)
+- Before: every boot/reload ran seedAll (9 endpoints ≈ up to ~2,300 row reads incl. /api/auth/me duplicate, 1000-log + 365-day pulls) plus 9-query dashboard (~150–300 reads). A stale cached sync.js (pre hasPending guard, served cache-first by SW) re-ran seedAll every 60s ≈ 3.3M reads/day — the main limit breaker.
+- After: dashboard ~6 queries; seed throttled to ≥5 min when idle and ~1,000 reads when it runs; normal session ≈ a few thousand reads.
 
 ## Next Steps
 - Check the UI in a browser (login → dashboard → notes → offline reload) after deploying the new service worker.

@@ -59,6 +59,7 @@ async function doSync(reason) {
 
   let lastError = null;
   let failedThisRun = 0;
+  let pushed = 0; // ops that actually reached the server this run
   for (const op of ops) {
     // Give up on ops that failed too many times — mark them 'failed' so they
     // stop blocking the queue and looping forever. The user sees the count.
@@ -69,6 +70,7 @@ async function doSync(reason) {
     try {
       await offline.pushOp(op);
       await offline.removeOp(op.id);
+      pushed += 1;
     } catch (err) {
       // Deleting something that is already gone is success (idempotent deletes).
       if (op.method === 'DELETE' && err.status === 404) {
@@ -92,13 +94,22 @@ async function doSync(reason) {
 
   offline.setStatus({ syncing: false, lastError: lastError || null });
 
-  // After the queue drains, re-download the latest server state into the cache.
+  // After the queue drains, refresh the offline cache — but ONLY when something
+  // actually changed. If no op was pushed this run the server data is identical
+  // to what the last seed already cached, so re-downloading it just burns D1
+  // reads (this ran on every boot/focus before the hasPending guard). When data
+  // did change, re-seed immediately so the UI and cache stay consistent.
   const remaining = await offline.countPending(uid);
   if (remaining === 0) {
     offline.setStatus({ syncing: true });
-    await offline.seedAll(uid);
+    // freshWindowMs=0 → always seed when we pushed ops. Otherwise seed only if
+    // the cache is older than 5 minutes (e.g. first boot of the day).
+    const seeded = await offline.seedAll(uid, {
+      skipAuth: false,
+      freshWindowMs: pushed > 0 ? 0 : 5 * 60 * 1000,
+    });
     offline.setStatus({ syncing: false, lastError: null });
-    offline.notifyDataChanged();
+    if (seeded) offline.notifyDataChanged();
   } else if (failedThisRun) {
     // Some ops failed but haven't hit max retries yet — refresh the pill so the
     // pending count is accurate; they will retry on the next trigger.
