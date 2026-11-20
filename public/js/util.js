@@ -82,6 +82,7 @@ export const icons = {
   logout: ic('<path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/>'),
   plus: ic('<path d="M12 5v14M5 12h14"/>'),
   trash: ic('<path d="M3 6h18"/><path d="M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/>'),
+  copy: ic('<rect x="8" y="8" width="13" height="13" rx="2"/><path d="M16 8V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h3"/>'),
   search: ic('<circle cx="11" cy="11" r="7"/><path d="M21 21l-4.35-4.35"/>'),
   x: ic('<path d="M18 6L6 18M6 6l12 12"/>'),
   check: ic('<path d="M20 6L9 17l-5-5"/>'),

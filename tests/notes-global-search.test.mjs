@@ -46,6 +46,9 @@ test('global search submits separately, opens the matching note, and uses offlin
   const modalRoot = new Element();
   const originalDocument = globalThis.document;
   const originalObserver = globalThis.MutationObserver;
+  const originalNavigatorDescriptor = Object.getOwnPropertyDescriptor(globalThis, 'navigator');
+  let copiedText;
+  Object.defineProperty(globalThis, 'navigator', { configurable: true, value: { clipboard: { writeText: async (text) => { copiedText = text; } } } });
   globalThis.document = { createElement: () => new Element(), getElementById: () => modalRoot, body: new Element() };
   globalThis.MutationObserver = class { observe() {} };
   t.after(() => {
@@ -53,6 +56,8 @@ test('global search submits separately, opens the matching note, and uses offlin
     else globalThis.document = originalDocument;
     if (originalObserver === undefined) delete globalThis.MutationObserver;
     else globalThis.MutationObserver = originalObserver;
+    if (originalNavigatorDescriptor) Object.defineProperty(globalThis, 'navigator', originalNavigatorDescriptor);
+    else delete globalThis.navigator;
   });
   const cachedReads = [];
   const cached = async (path) => {
@@ -98,6 +103,10 @@ test('global search submits separately, opens the matching note, and uses offlin
   assert.equal(results.hidden, true);
 
   await root.querySelectorAll('.folder-open').find((btn) => btn.dataset.id === '2').fire('click');
+  const copyIndex = root.innerHTML.indexOf('class="icon-btn copy-note"');
+  assert.ok(copyIndex >= 0 && copyIndex < root.innerHTML.indexOf('class="icon-btn edit-note"'), 'Copy icon precedes Edit');
+  await root.querySelector('.copy-note').fire('click');
+  assert.equal(copiedText, `Shopping\n\n${notes[0].body}`, 'Copy uses full note content, not the preview');
   const entry = root.querySelector('.view-note');
   assert.ok(entry, 'Folder entries open full details');
   assert.match(entry.attrs, /role="button" tabindex="0"/);

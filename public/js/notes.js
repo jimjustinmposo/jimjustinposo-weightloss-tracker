@@ -242,6 +242,7 @@ async function renderFolderNotes(root, id, folder, folders) {
           <div class="meta" style="font-size:12px;color:var(--muted);white-space:pre-wrap;max-height:4.5em;overflow:hidden">${esc(preview)}</div>
           <span class="meta">${noteDate(n.updated_at)}</span>
         </div>
+        <button class="icon-btn copy-note" data-id="${Number(n.id)}" title="Copy entry" aria-label="Copy entry">${icons.copy}</button>
         <button class="icon-btn edit-note" data-id="${Number(n.id)}" title="Edit entry">${icons.pencil}</button>
         <button class="icon-btn del-note" data-id="${Number(n.id)}" title="Delete entry">${icons.trash}</button>
       </div>`;
@@ -283,6 +284,14 @@ async function renderFolderNotes(root, id, folder, folders) {
   });
   // Pass the already-fetched note object — otherwise the editor re-downloads
   // the whole folder (every body + photo blob) just to find one note by id.
+  qsa('.copy-note', root).forEach((btn) => btn.addEventListener('click', async () => {
+    const note = list.find((n) => Number(n.id) === Number(btn.dataset.id));
+    if (!note) return;
+    try {
+      await navigator.clipboard.writeText([note.title, notePlainText(note.body)].filter(Boolean).join('\n\n'));
+      toast('Entry copied');
+    } catch { toast('Could not copy entry', 'error'); }
+  }));
   qsa('.edit-note', root).forEach((btn) => btn.addEventListener('click', () => editNote(root, Number(btn.dataset.id), list.find((n) => Number(n.id) === Number(btn.dataset.id)))));
   qsa('.del-note', root).forEach((btn) => {
     btn.addEventListener('click', async () => {

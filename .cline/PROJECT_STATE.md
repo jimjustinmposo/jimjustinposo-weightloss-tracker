@@ -19,6 +19,7 @@
 
 ## Implemented Features
 - [x] Notes entry previews and search results open full read-only details with an Edit action; verified using DOM-double tests.
+- [x] Notes list rows copy the full entry title and text to the clipboard before the Edit action.
 - [x] Notes editor uses a professional, auto-growing entry box with visible caret, placeholder, and focus styling.
 - [x] Notes supports pasting/adding compressed inline photos with safe rendering, search exclusions, offline support, and API validation.
 - [x] Notes search and offline lifecycle tests pass.
@@ -57,6 +58,7 @@
 - seedAll() no longer full-table pulls: limits aligned to UI (weights 90, logs 500, steps/pushups 180) and a freshWindowMs throttle skips re-seeding when nothing changed.
 - sync.js seeds only when ops were pushed (or cache is >5 min stale); notifyDataChanged fires only after a real seed.
 - Notes edit reuses the already-fetched note object (no folder-wide re-download incl. photo blobs).
+- Notes list copy uses the already-fetched entry and copies its full plain-text content.
 - Service worker bumped to v8 to evict stale bundles.
 
 ## D1 Usage Model (single user, <500 records)
